@@ -1,0 +1,14 @@
+[project]
+name = "dart"
+version = "0.1.0"
+description = "Add your description here"
+requires-python = ">=3.13"
+dependencies = [
+    "asyncio>=3.4.3",
+    "customtkinter>=5.2.2",
+    "matplotlib>=3.10.1",
+    "mplfinance>=0.12.10b0",
+    "pandas>=2.2.3",
+    "python-deriv-api>=0.1.6",
+    "tk>=0.1.0",
+]
