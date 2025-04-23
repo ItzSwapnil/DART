@@ -1,7 +1,7 @@
 """Configuration settings for the DART application."""
 
 # Deriv API settings
-DERIV_APP_ID = '00000' #Change it to your app ID
+DERIV_APP_ID = '70789' #Change it to your app ID
 
 # UI settings
 DEFAULT_THEME = 'dark' #change it to 'light' if you prefer light background

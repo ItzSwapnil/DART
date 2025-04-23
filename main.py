@@ -1,6 +1,8 @@
 """
 DART - Deep Adaptive Reinforcement Trader
 Main entry point for the application.
+
+note to self: for market DRL use TA-Lib and not tensorflow
 """
 import tkinter as tk
 from ui.app import DerivApp
