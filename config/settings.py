@@ -2,6 +2,20 @@
 
 # Deriv API settings
 DERIV_APP_ID = '70789' #Change it to your app ID
+DERIV_API_TOKEN = 'xxxxxxxxxxxxxx'    #Change it to your API token
+
+# Auto-trading settings
+AUTO_TRADE_ENABLED = False  # Default to disabled
+TRADE_DURATION_SECONDS = 60  # Default duration for trades (1 minute)
+TRADE_AMOUNT = 10.0  # Default trade amount
+TRADE_CURRENCY = 'USD'  # Default currency
+MAX_DAILY_LOSS = 100.0  # Maximum daily loss limit
+MAX_CONSECUTIVE_LOSSES = 3  # Maximum consecutive losses before recalculating strategy
+
+# ML model settings
+TRAINING_DAYS = 7  # Number of days of historical data to use for training
+MODEL_UPDATE_FREQUENCY = 24  # Hours between model updates
+CONFIDENCE_THRESHOLD = 0.7  # Minimum confidence level to execute a trade
 
 # UI settings
 DEFAULT_THEME = 'dark' #change it to 'light' if you prefer light background
