@@ -11,6 +11,7 @@ DART (Deep Adaptive Reinforcement Trader) is a Python application designed to vi
 
 ### Market Analysis and Visualization
 - **Real-time Market Data**: Connect to Deriv API to fetch live market data
+- **Market Status Indicators**: Clearly shows which markets are closed with visual indicators
 - **Interactive Charts**: View candlestick charts for various markets and timeframes
 - **Price Projections**: Generate and visualize price projections using linear regression
 - **Confidence Intervals**: Display upper and lower confidence bounds for price projections
@@ -177,6 +178,7 @@ The current implementation includes market data visualization, ML-based strategy
 - ✅ **Auto-Trading**: Automated trade execution with the Deriv API
 - ✅ **Adaptive Learning**: Strategy recalculation based on trade outcomes
 - ✅ **Risk Management**: Daily loss limits and confidence thresholds
+- ✅ **Market Status Indicators**: Visual indicators for closed markets
 
 ### Future Development Plans
 1. **Deep Neural Networks**: Implement more advanced neural network architectures for improved prediction accuracy

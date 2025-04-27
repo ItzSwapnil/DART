@@ -155,8 +155,62 @@ class DerivApp:
         """Update the Combobox with market data."""
         market_names = list(self.symbols_dict.keys())
         self.market_combobox['values'] = market_names
+
+        # Create a custom combobox with closed market indicators
+        if hasattr(self, 'market_listbox'):
+            self.market_listbox.destroy()
+
+        # Create a listbox to replace the combobox dropdown
+        self.market_listbox = tk.Listbox(self.control_frame, width=40, height=10)
+        self.market_listbox.grid(row=1, column=0, columnspan=2, padx=5, pady=5)
+        self.market_listbox.grid_remove()  # Hide initially
+
+        # Populate the listbox with market names
+        for market in market_names:
+            if "[CLOSED]" in market:
+                # Add closed markets with a different style (red color)
+                self.market_listbox.insert(tk.END, market)
+                self.market_listbox.itemconfig(tk.END, {'fg': 'red'})
+            else:
+                self.market_listbox.insert(tk.END, market)
+
+        # Bind selection event
+        self.market_listbox.bind('<<ListboxSelect>>', self.on_market_select)
+
+        # Show/hide listbox when combobox is clicked
+        self.market_combobox.bind('<Button-1>', self.toggle_market_listbox)
+
         if market_names:
             self.market_combobox.current(0)  # Set default selection
+
+    def toggle_market_listbox(self, event=None):
+        """Show or hide the market listbox."""
+        if self.market_listbox.winfo_ismapped():
+            self.market_listbox.grid_remove()
+        else:
+            self.market_listbox.grid()
+
+    def on_market_select(self, event=None):
+        """Handle market selection from the listbox."""
+        if not event:
+            return
+
+        # Get selected market
+        selection = self.market_listbox.curselection()
+        if not selection:
+            return
+
+        # Get the selected market name
+        market = self.market_listbox.get(selection[0])
+
+        # Update the combobox value
+        self.market_var.set(market)
+
+        # Hide the listbox
+        self.market_listbox.grid_remove()
+
+        # Trigger selection change
+        self.on_selection_change()
 
     def on_selection_change(self, event=None):
         """

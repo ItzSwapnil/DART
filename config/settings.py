@@ -2,7 +2,7 @@
 
 # Deriv API settings
 DERIV_APP_ID = '70789' #Change it to your app ID
-DERIV_API_TOKEN = 'xxxxxxxxxxxxxx'    #Change it to your API token
+DERIV_API_TOKEN = 'XXXXX'    #Change it to your API token
 
 # Auto-trading settings
 AUTO_TRADE_ENABLED = False  # Default to disabled

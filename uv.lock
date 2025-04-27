@@ -86,6 +86,7 @@ dependencies = [
     { name = "python-deriv-api" },
     { name = "scikit-learn" },
     { name = "sv-ttk" },
+    { name = "ta" },
     { name = "tk" },
 ]
 
@@ -99,6 +100,7 @@ requires-dist = [
     { name = "python-deriv-api", specifier = ">=0.1.6" },
     { name = "scikit-learn", specifier = ">=1.6.1" },
     { name = "sv-ttk", specifier = ">=2.6.0" },
+    { name = "ta", specifier = ">=0.11.0" },
     { name = "tk", specifier = ">=0.1.0" },
 ]
 
@@ -423,6 +425,16 @@ sdist = { url = "https://files.pythonhosted.org/packages/40/da/6ad667a4bad4d66ec
 wheels = [
     { url = "https://files.pythonhosted.org/packages/0f/3d/be0abc3202e90f282ad465f4e7c6e41bc8dce810ce5d1611566a1e7dfba8/sv_ttk-2.6.0-py3-none-any.whl", hash = "sha256:4319c52edf2e14732fe84bdc9788e26f9e9a1ad79451ec0f89f0120ffc8105d9", size = 49097 },
 ]
+
+[[package]]
+name = "ta"
+version = "0.11.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "numpy" },
+    { name = "pandas" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/e0/9a/37d92a6b470dc9088612c2399a68f1a9ac22872d4e1eff416818e22ab11b/ta-0.11.0.tar.gz", hash = "sha256:de86af43418420bd6b088a2ea9b95483071bf453c522a8441bc2f12bcf8493fd", size = 25308 }
 
 [[package]]
 name = "threadpoolctl"

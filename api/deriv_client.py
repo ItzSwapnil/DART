@@ -25,8 +25,17 @@ class DerivClient:
             api = await self._get_api_instance()
             response = await api.active_symbols({"active_symbols": "brief", "product_type": "basic"})
             active_symbols = response.get('active_symbols', [])
-            symbols_dict = {f"{symbol['market_display_name']} - {symbol['display_name']}": symbol['symbol'] for
-                           symbol in active_symbols}
+            symbols_dict = {}
+            for symbol in active_symbols:
+                # Check if the market is closed
+                is_closed = not symbol.get('exchange_is_open', True)
+                market_name = f"{symbol['market_display_name']} - {symbol['display_name']}"
+
+                # Add closed indicator to market name if closed
+                if is_closed:
+                    market_name = f"{market_name} [CLOSED]"
+
+                symbols_dict[market_name] = symbol['symbol']
             return symbols_dict
         except Exception as e:
             print(f"Error fetching active symbols: {e}")
