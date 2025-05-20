@@ -1,8 +1,10 @@
 """Configuration settings for the DART application."""
 
 # Deriv API settings
-DERIV_APP_ID = '70789' #Change it to your app ID
-DERIV_API_TOKEN = 'XXXXX'    #Change it to your API token
+DERIV_APP_ID = '00000' # Change it to your app ID
+# You need a valid API token from Deriv.com to execute trades
+# Get your API token from: https://app.deriv.com/account/api-token
+DERIV_API_TOKEN = '0000000'    # Replace with your valid API token
 
 # Auto-trading settings
 AUTO_TRADE_ENABLED = False  # Default to disabled
@@ -15,7 +17,7 @@ MAX_CONSECUTIVE_LOSSES = 3  # Maximum consecutive losses before recalculating st
 # ML model settings
 TRAINING_DAYS = 7  # Number of days of historical data to use for training
 MODEL_UPDATE_FREQUENCY = 24  # Hours between model updates
-CONFIDENCE_THRESHOLD = 0.7  # Minimum confidence level to execute a trade
+CONFIDENCE_THRESHOLD = 0.4  # Minimum confidence level to execute a trade
 
 # UI settings
 DEFAULT_THEME = 'dark' #change it to 'light' if you prefer light background

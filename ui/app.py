@@ -9,16 +9,21 @@ from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 import mplfinance as mpf
 from sklearn.linear_model import LinearRegression
 import os
+import datetime
 
 from api.deriv_client import DerivClient
-from ui.chart_styles import get_dark_style
+from ui.chart_styles import get_chart_style
 from utils.timeframe import get_granularity_mapping
 from ml.trading_ai import TradingAI
 from ml.auto_trader import AutoTrader
 from config.settings import (
     DERIV_APP_ID, DERIV_API_TOKEN, DEFAULT_CANDLE_COUNT,
-    AUTO_TRADE_ENABLED, CONFIDENCE_THRESHOLD
+    AUTO_TRADE_ENABLED, CONFIDENCE_THRESHOLD, DEFAULT_THEME,
+    DEFAULT_TIMEFRAME
 )
+
+# Default confidence threshold from settings
+CURRENT_CONFIDENCE_THRESHOLD = CONFIDENCE_THRESHOLD
 
 
 class DerivApp:
@@ -27,6 +32,16 @@ class DerivApp:
     def __init__(self, root):
         self.root = root
         self.root.title("DART - Deep Adaptive Reinforcement Trader")
+
+        # Set window size and position
+        window_width = 1200
+        window_height = 800
+        screen_width = root.winfo_screenwidth()
+        screen_height = root.winfo_screenheight()
+        center_x = int(screen_width/2 - window_width/2)
+        center_y = int(screen_height/2 - window_height/2)
+        self.root.geometry(f'{window_width}x{window_height}+{center_x}+{center_y}')
+        self.root.minsize(800, 600)
 
         # Initialize the Deriv client with API token
         self.client = DerivClient(app_id=DERIV_APP_ID, api_token=DERIV_API_TOKEN)
@@ -38,8 +53,9 @@ class DerivApp:
         # Register for auto-trader status updates
         self.auto_trader.register_status_callback(self.on_trade_status_update)
 
-        # Apply the Sun Valley theme
-        sv_ttk.set_theme("dark")
+        # Set theme
+        self.current_theme = DEFAULT_THEME
+        sv_ttk.set_theme(self.current_theme)
 
         # Setup UI components
         self._setup_ui()
@@ -48,8 +64,12 @@ class DerivApp:
         self.loop = asyncio.new_event_loop()
         threading.Thread(target=self.start_async_loop, daemon=True).start()
 
-        # Schedule the population of markets
+        # Schedule the population of markets and account info
         asyncio.run_coroutine_threadsafe(self.populate_markets(), self.loop)
+        asyncio.run_coroutine_threadsafe(self.update_account_info(), self.loop)
+
+        # Schedule periodic account info updates
+        self.root.after(30000, self.schedule_account_update)  # Update every 30 seconds
 
     def _setup_ui(self):
         """Set up the user interface components."""
@@ -60,6 +80,65 @@ class DerivApp:
         # Top section for controls
         self.top_section = ttk.Frame(self.main_container)
         self.top_section.pack(side=tk.TOP, fill=tk.X)
+
+        # Frame for account dashboard
+        self.account_frame = ttk.LabelFrame(self.top_section, text="Account Dashboard", padding=(10, 5))
+        self.account_frame.pack(side=tk.TOP, fill=tk.X, padx=10, pady=5)
+
+        # Account connection status
+        self.connection_frame = ttk.Frame(self.account_frame)
+        self.connection_frame.grid(row=0, column=0, padx=5, pady=5, sticky=tk.W)
+
+        self.connection_label = ttk.Label(self.connection_frame, text="Connection Status:")
+        self.connection_label.grid(row=0, column=0, padx=5, pady=2, sticky=tk.W)
+
+        self.connection_status_var = tk.StringVar(value="Checking...")
+        self.connection_status = ttk.Label(self.connection_frame, textvariable=self.connection_status_var)
+        self.connection_status.grid(row=0, column=1, padx=5, pady=2, sticky=tk.W)
+
+        # Connection indicator (colored circle)
+        self.connection_indicator_canvas = tk.Canvas(self.connection_frame, width=15, height=15, bg=self.root.cget('bg'), highlightthickness=0)
+        self.connection_indicator_canvas.grid(row=0, column=2, padx=5, pady=2)
+        self.connection_indicator = self.connection_indicator_canvas.create_oval(2, 2, 13, 13, fill="gray")
+
+        # Account balance
+        self.balance_frame = ttk.Frame(self.account_frame)
+        self.balance_frame.grid(row=0, column=1, padx=5, pady=5, sticky=tk.W)
+
+        self.balance_label = ttk.Label(self.balance_frame, text="Account Balance:")
+        self.balance_label.grid(row=0, column=0, padx=5, pady=2, sticky=tk.W)
+
+        self.balance_var = tk.StringVar(value="--")
+        self.balance_value = ttk.Label(self.balance_frame, textvariable=self.balance_var)
+        self.balance_value.grid(row=0, column=1, padx=5, pady=2, sticky=tk.W)
+
+        # Confidence threshold slider
+        self.confidence_frame = ttk.Frame(self.account_frame)
+        self.confidence_frame.grid(row=0, column=2, padx=5, pady=5, sticky=tk.W)
+
+        self.confidence_label = ttk.Label(self.confidence_frame, text="Confidence Threshold:")
+        self.confidence_label.grid(row=0, column=0, padx=5, pady=2, sticky=tk.W)
+
+        self.confidence_var = tk.DoubleVar(value=CURRENT_CONFIDENCE_THRESHOLD)
+        self.confidence_slider = ttk.Scale(
+            self.confidence_frame, 
+            from_=0.1, 
+            to=0.9, 
+            orient=tk.HORIZONTAL, 
+            variable=self.confidence_var,
+            length=150,
+            command=self.on_confidence_change
+        )
+        self.confidence_slider.grid(row=0, column=1, padx=5, pady=2, sticky=tk.W)
+
+        self.confidence_value_var = tk.StringVar(value=f"{CURRENT_CONFIDENCE_THRESHOLD:.1f}")
+        self.confidence_value = ttk.Label(self.confidence_frame, textvariable=self.confidence_value_var)
+        self.confidence_value.grid(row=0, column=2, padx=5, pady=2, sticky=tk.W)
+
+        # Refresh button for account info
+        self.refresh_button = ttk.Button(
+            self.account_frame, text="Refresh", command=self.refresh_account_info)
+        self.refresh_button.grid(row=0, column=3, padx=5, pady=5, sticky=tk.E)
 
         # Frame for chart controls
         self.control_frame = ttk.LabelFrame(self.top_section, text="Chart Controls", padding=(10, 5))
@@ -80,10 +159,16 @@ class DerivApp:
 
         self.timeframe_var = tk.StringVar()
         self.timeframe_combobox = ttk.Combobox(self.control_frame, textvariable=self.timeframe_var, state='readonly', width=15)
-        self.timeframe_combobox['values'] = list(get_granularity_mapping().keys())
+        timeframe_values = list(get_granularity_mapping().keys())
+        self.timeframe_combobox['values'] = timeframe_values
         self.timeframe_combobox.grid(row=0, column=3, padx=5, pady=5)
         self.timeframe_combobox.bind('<<ComboboxSelected>>', self.on_selection_change)
-        self.timeframe_combobox.current(0)  # Default to DEFAULT_TIMEFRAME
+
+        # Set default timeframe from settings
+        if DEFAULT_TIMEFRAME in timeframe_values:
+            self.timeframe_var.set(DEFAULT_TIMEFRAME)
+        else:
+            self.timeframe_combobox.current(0)
 
         # Projection toggle
         self.projection_var = tk.BooleanVar(value=True)  # Default to showing projection
@@ -91,6 +176,11 @@ class DerivApp:
             self.control_frame, text="Show Projection", variable=self.projection_var,
             command=self.on_selection_change)
         self.projection_check.grid(row=0, column=4, padx=5, pady=5)
+
+        # Theme toggle button
+        self.theme_button = ttk.Button(
+            self.control_frame, text="Toggle Theme", command=self.toggle_theme)
+        self.theme_button.grid(row=0, column=5, padx=5, pady=5)
 
         # Frame for trading controls
         self.trading_frame = ttk.LabelFrame(self.top_section, text="Auto-Trading Controls", padding=(10, 5))
@@ -110,17 +200,46 @@ class DerivApp:
         self.stop_trading_button.grid(row=0, column=2, padx=5, pady=5)
         self.stop_trading_button.config(state=tk.DISABLED)  # Disabled initially
 
-        # Trading status - row 2
+        # Price settings - row 2
+        self.price_frame = ttk.Frame(self.trading_frame)
+        self.price_frame.grid(row=1, column=0, columnspan=3, padx=5, pady=5, sticky=tk.W+tk.E)
+
+        # Manual price entry
+        self.price_label = ttk.Label(self.price_frame, text="Trading Price:")
+        self.price_label.grid(row=0, column=0, padx=5, pady=2, sticky=tk.W)
+
+        self.price_var = tk.StringVar()
+        self.price_entry = ttk.Entry(self.price_frame, textvariable=self.price_var, width=10)
+        self.price_entry.grid(row=0, column=1, padx=5, pady=2, sticky=tk.W)
+
+        # AI price management toggle
+        self.ai_price_var = tk.BooleanVar(value=False)
+        self.ai_price_check = ttk.Checkbutton(
+            self.price_frame, text="AI-Managed Price", variable=self.ai_price_var)
+        self.ai_price_check.grid(row=0, column=2, padx=5, pady=2, sticky=tk.W)
+
+        # AI money management toggle
+        self.ai_money_var = tk.BooleanVar(value=False)
+        self.ai_money_check = ttk.Checkbutton(
+            self.price_frame, text="AI-Managed Trading", variable=self.ai_money_var)
+        self.ai_money_check.grid(row=0, column=3, padx=5, pady=2, sticky=tk.W)
+
+        # Help button for AI features
+        self.help_button = ttk.Button(
+            self.price_frame, text="?", width=2, command=self.show_ai_help)
+        self.help_button.grid(row=0, column=4, padx=5, pady=2, sticky=tk.W)
+
+        # Trading status - row 3
         self.status_label = ttk.Label(self.trading_frame, text="Status:")
-        self.status_label.grid(row=1, column=0, padx=5, pady=5, sticky=tk.W)
+        self.status_label.grid(row=2, column=0, padx=5, pady=5, sticky=tk.W)
 
         self.status_var = tk.StringVar(value="Ready")
         self.status_value = ttk.Label(self.trading_frame, textvariable=self.status_var)
-        self.status_value.grid(row=1, column=1, columnspan=2, padx=5, pady=5, sticky=tk.W)
+        self.status_value.grid(row=2, column=1, columnspan=2, padx=5, pady=5, sticky=tk.W)
 
-        # Trading metrics - row 3
+        # Trading metrics - row 4
         self.metrics_frame = ttk.Frame(self.trading_frame)
-        self.metrics_frame.grid(row=2, column=0, columnspan=3, padx=5, pady=5, sticky=tk.W+tk.E)
+        self.metrics_frame.grid(row=3, column=0, columnspan=3, padx=5, pady=5, sticky=tk.W+tk.E)
 
         # Metrics labels
         metrics_labels = ["Trades:", "Win Rate:", "Profit/Loss:", "Strategy:"]
@@ -131,6 +250,22 @@ class DerivApp:
             self.metrics_vars[label] = tk.StringVar(value="--")
             ttk.Label(self.metrics_frame, textvariable=self.metrics_vars[label]).grid(
                 row=0, column=i*2+1, padx=5, pady=2, sticky=tk.W)
+
+        # Live trade monitoring - row 5
+        self.monitoring_frame = ttk.LabelFrame(self.trading_frame, text="Live Trade Monitoring", padding=(5, 5))
+        self.monitoring_frame.grid(row=4, column=0, columnspan=3, padx=5, pady=5, sticky=tk.W+tk.E)
+
+        # Create a text widget for detailed trade status
+        self.trade_monitor = tk.Text(self.monitoring_frame, height=5, width=60, wrap=tk.WORD, state=tk.DISABLED)
+        self.trade_monitor.grid(row=0, column=0, padx=5, pady=5, sticky=tk.W+tk.E)
+
+        # Add a scrollbar
+        self.monitor_scrollbar = ttk.Scrollbar(self.monitoring_frame, orient=tk.VERTICAL, command=self.trade_monitor.yview)
+        self.monitor_scrollbar.grid(row=0, column=1, sticky=tk.NS)
+        self.trade_monitor.config(yscrollcommand=self.monitor_scrollbar.set)
+
+        # Configure the monitoring frame to expand
+        self.monitoring_frame.columnconfigure(0, weight=1)
 
         # Frame for chart display
         self.chart_frame = ttk.Frame(self.main_container, padding=(10, 5))
@@ -321,6 +456,28 @@ class DerivApp:
         self.status_var.set(f"Error: {error_msg}")
         messagebox.showerror("Training Error", f"An error occurred during model training:\n{error_msg}")
 
+    def show_ai_help(self):
+        """Show help information about AI trading features."""
+        help_text = """
+AI Trading Features:
+
+1. Manual Price Setting:
+   Enter a specific price for trade execution. If left empty, 
+   the current market price will be used.
+
+2. AI-Managed Price:
+   When enabled, the AI will calculate optimal entry/exit prices
+   based on recent market data. For CALL trades, it will try to
+   get a slightly lower entry price. For PUT trades, it will try
+   to get a slightly higher exit price.
+
+3. AI-Managed Trading:
+   When enabled, the AI will fully manage your trading strategy,
+   including position sizing, risk management, and trade timing.
+   The AI will adapt to market conditions and your trading history.
+"""
+        messagebox.showinfo("AI Trading Features Help", help_text)
+
     def on_start_trading(self):
         """Handle the Start Auto-Trading button click."""
         if not self.market_var.get() or not self.timeframe_var.get():
@@ -335,8 +492,52 @@ class DerivApp:
         symbol = self.symbols_dict[self.market_var.get()]
         granularity = get_granularity_mapping()[self.timeframe_var.get()]
 
-        # Start auto-trading
-        success = self.auto_trader.start_trading(symbol, granularity)
+        # Get trading settings
+        manual_price = None
+        use_ai_price = self.ai_price_var.get()
+        ai_managed_trading = self.ai_money_var.get()
+
+        # Use the current confidence threshold from the slider
+        global CURRENT_CONFIDENCE_THRESHOLD
+        confidence_threshold = CURRENT_CONFIDENCE_THRESHOLD
+
+        # Parse manual price if provided
+        if self.price_var.get().strip():
+            try:
+                manual_price = float(self.price_var.get().strip())
+            except ValueError:
+                messagebox.showerror("Invalid Price", "Please enter a valid number for the trading price.")
+                return
+
+        # Check for conflicts in settings
+        if manual_price and use_ai_price:
+            response = messagebox.askyesno(
+                "Price Setting Conflict", 
+                "Both manual price and AI-managed price are set. Do you want to use the manual price?"
+            )
+            if response:
+                use_ai_price = False
+            else:
+                manual_price = None
+
+        # If AI-managed trading is enabled, show confirmation
+        if ai_managed_trading:
+            response = messagebox.askyesno(
+                "AI-Managed Trading", 
+                "AI-managed trading will fully control your trading strategy, including position sizing and risk management. Continue?"
+            )
+            if not response:
+                ai_managed_trading = False
+
+        # Start auto-trading with all settings
+        success = self.auto_trader.start_trading(
+            symbol=symbol, 
+            granularity=granularity,
+            manual_price=manual_price,
+            use_ai_price=use_ai_price,
+            ai_managed_trading=ai_managed_trading,
+            confidence_threshold=confidence_threshold
+        )
 
         if success:
             # Update UI
@@ -377,13 +578,60 @@ class DerivApp:
         """Update the UI with trade status information."""
         status = status_data.get("status")
         message = status_data.get("message", "")
+        timestamp = datetime.datetime.now().strftime("%H:%M:%S")
 
         # Update status message
         self.status_var.set(message)
 
-        # Update metrics based on status
-        if status == "completed":
-            # Update trade count and profit/loss
+        # Add timestamp to the message for the monitor
+        monitor_message = f"[{timestamp}] {status.upper()}: {message}\n"
+
+        # Update the trade monitor text widget
+        self.trade_monitor.config(state=tk.NORMAL)
+        self.trade_monitor.insert(tk.END, monitor_message)
+
+        # Add detailed information based on status type
+        if status == "monitoring":
+            contract_id = status_data.get("contract_id", "")
+            if contract_id:
+                self.trade_monitor.insert(tk.END, f"  Monitoring contract ID: {contract_id}\n")
+
+        elif status == "update":
+            # Add real-time trade update information
+            contract_id = status_data.get("contract_id", "")
+            current_price = status_data.get("current_price", 0)
+            entry_price = status_data.get("entry_price", 0)
+            pnl_percent = status_data.get("pnl_percent", 0)
+            remaining_time = status_data.get("remaining_time", "Unknown")
+            contract_type = status_data.get("contract_type", "")
+            symbol = status_data.get("symbol", "")
+
+            # Format PnL with color indicator
+            pnl_indicator = "▲" if pnl_percent > 0 else "▼" if pnl_percent < 0 else "■"
+            pnl_str = f"{pnl_indicator} {abs(pnl_percent):.2f}%"
+
+            details = (
+                f"  Symbol: {symbol} | Type: {contract_type} | Time left: {remaining_time}\n"
+                f"  Entry: {entry_price:.4f} | Current: {current_price:.4f} | PnL: {pnl_str}\n"
+            )
+            self.trade_monitor.insert(tk.END, details)
+
+        elif status == "completed":
+            # Add detailed trade result
+            profit = status_data.get("profit", 0)
+            contract_info = status_data.get("contract_info", {})
+
+            profit_str = f"${profit:.2f}" if profit >= 0 else f"-${abs(profit):.2f}"
+            buy_price = contract_info.get("buy_price", 0)
+            sell_price = contract_info.get("sell_price", 0)
+
+            details = (
+                f"  Contract completed with {profit_str} profit\n"
+                f"  Buy price: ${buy_price:.2f}, Sell price: ${sell_price:.2f}\n"
+            )
+            self.trade_monitor.insert(tk.END, details)
+
+            # Update trade count and profit/loss in metrics
             trader_status = self.auto_trader.get_status()
             self.metrics_vars["Trades:"].set(str(trader_status["trade_count"]))
 
@@ -393,21 +641,73 @@ class DerivApp:
             self.metrics_vars["Win Rate:"].set(f"{win_rate:.2%}")
 
             # Update profit/loss
-            profit = status_data.get("profit", 0)
-            profit_str = f"${profit:.2f}" if profit >= 0 else f"-${abs(profit):.2f}"
             self.metrics_vars["Profit/Loss:"].set(profit_str)
 
         elif status == "strategy":
-            # Update strategy information
+            # Add detailed strategy information
             strategy = status_data.get("strategy", {})
             if strategy:
                 direction = strategy.get("direction", "")
                 confidence = strategy.get("confidence", 0)
+                duration = strategy.get("duration", 0)
+
+                details = (
+                    f"  Strategy: {direction} with {confidence:.2%} confidence\n"
+                    f"  Duration: {duration} seconds\n"
+                )
+
+                # Add technical indicators if available
+                indicators = strategy.get("technical_indicators", {})
+                if indicators:
+                    indicators_str = "  Indicators: "
+                    for key, value in indicators.items():
+                        indicators_str += f"{key}={value:.4f} "
+                    details += indicators_str + "\n"
+
+                self.trade_monitor.insert(tk.END, details)
+
+                # Update strategy in metrics
                 self.metrics_vars["Strategy:"].set(f"{direction} ({confidence:.2%})")
 
+        elif status == "executed":
+            # Add contract execution details
+            contract_id = status_data.get("contract_id", "")
+            amount = status_data.get("amount", 0)
+
+            details = (
+                f"  Contract ID: {contract_id}\n"
+                f"  Amount: ${amount:.2f}\n"
+            )
+            self.trade_monitor.insert(tk.END, details)
+
         elif status == "error":
+            # Add error details
+            self.trade_monitor.insert(tk.END, f"  Error: {message}\n")
             # Show error message
             messagebox.showerror("Trading Error", message)
+
+        # Ensure the latest entry is visible
+        self.trade_monitor.see(tk.END)
+
+        # Limit the text to the last 100 lines to prevent memory issues
+        line_count = int(self.trade_monitor.index('end-1c').split('.')[0])
+        if line_count > 100:
+            self.trade_monitor.delete('1.0', f'{line_count-100}.0')
+
+        # Disable the text widget again
+        self.trade_monitor.config(state=tk.DISABLED)
+
+    def toggle_theme(self):
+        """Toggle between dark and light themes."""
+        # Toggle the theme
+        self.current_theme = 'light' if self.current_theme == 'dark' else 'dark'
+
+        # Apply the new theme
+        sv_ttk.set_theme(self.current_theme)
+
+        # Update the chart if it exists
+        if hasattr(self, 'last_candles') and self.last_candles:
+            self.plot_candlestick_chart(self.last_candles, self.projection_var.get())
 
     def plot_candlestick_chart(self, candles, show_projection=False):
         """Plot candlestick chart with the given candle data."""
@@ -416,6 +716,9 @@ class DerivApp:
 
         if not candles:
             return
+
+        # Store the candles for theme switching
+        self.last_candles = candles
 
         df = pd.DataFrame(candles)
         df['time'] = pd.to_datetime(df['epoch'], unit='s')
@@ -426,7 +729,7 @@ class DerivApp:
         # Create plot arguments
         plot_args = {
             'type': 'candle',
-            'style': get_dark_style(),
+            'style': get_chart_style(self.current_theme),
             'returnfig': True
         }
 
@@ -497,3 +800,58 @@ class DerivApp:
         self.canvas = FigureCanvasTkAgg(fig, master=self.chart_frame)
         self.canvas.draw()
         self.canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+
+    def on_confidence_change(self, value):
+        """Handle changes to the confidence threshold slider."""
+        global CURRENT_CONFIDENCE_THRESHOLD
+        # Update the current confidence threshold
+        CURRENT_CONFIDENCE_THRESHOLD = float(value)
+        # Update the display
+        self.confidence_value_var.set(f"{CURRENT_CONFIDENCE_THRESHOLD:.1f}")
+
+    async def update_account_info(self):
+        """Update account connection status and balance."""
+        try:
+            # Check connection
+            is_connected = await self.client.check_connection()
+
+            # Update connection status in UI
+            self.root.after(0, lambda: self._update_connection_status(is_connected))
+
+            if is_connected:
+                # Get account info
+                account_info = await self.client.get_account_info()
+
+                if account_info:
+                    # Get balance
+                    balance_info = await self.client.get_account_balance()
+
+                    if balance_info:
+                        # Update balance in UI
+                        balance = balance_info.get("balance")
+                        currency = balance_info.get("currency")
+                        balance_text = f"{balance} {currency}" if balance is not None and currency else "--"
+
+                        self.root.after(0, lambda: self.balance_var.set(balance_text))
+        except Exception as e:
+            print(f"Error updating account info: {e}")
+            self.root.after(0, lambda: self._update_connection_status(False))
+
+    def _update_connection_status(self, is_connected):
+        """Update the connection status indicator in the UI."""
+        if is_connected:
+            self.connection_status_var.set("Connected")
+            self.connection_indicator_canvas.itemconfig(self.connection_indicator, fill="green")
+        else:
+            self.connection_status_var.set("Disconnected")
+            self.connection_indicator_canvas.itemconfig(self.connection_indicator, fill="red")
+
+    def refresh_account_info(self):
+        """Manually refresh account information."""
+        asyncio.run_coroutine_threadsafe(self.update_account_info(), self.loop)
+
+    def schedule_account_update(self):
+        """Schedule periodic updates of account information."""
+        asyncio.run_coroutine_threadsafe(self.update_account_info(), self.loop)
+        # Schedule next update in 30 seconds
+        self.root.after(30000, self.schedule_account_update)
