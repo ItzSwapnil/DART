@@ -1,7 +1,7 @@
 # DART: Deep Adaptive Reinforcement Trader
 ## Comprehensive Project Report
 
-![DART Project Logo](https://via.placeholder.com/800x200?text=DART:+Deep+Adaptive+Reinforcement+Trader)
+![DART Project Logo](https://github.com/ItzSwapnil/DART/blob/master/DART-Logo.png?raw=true)
 
 **Author:** ItzSwapnil  
 **Date:** June 27, 2025  
