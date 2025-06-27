@@ -20,12 +20,26 @@ from ta.volume import VolumeWeightedAveragePrice, OnBalanceVolumeIndicator
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger('trading_ai')
 
+# Import enhanced components
+try:
+    from ml.deep_rl_agent import SoftActorCritic
+    from ml.risk_manager import AdvancedRiskManager, RiskLevel, MarketCondition
+    from ml.feature_extractor import MultiModalFeatureExtractor
+    ENHANCED_COMPONENTS_AVAILABLE = True
+except ImportError:
+    logger.warning("Enhanced components not available, using basic implementation")
+    ENHANCED_COMPONENTS_AVAILABLE = False
+
 class TradingAI:
     """AI system for market analysis and trading strategy generation."""
 
-    def __init__(self, model_dir='models'):
+    def __init__(self, model_dir='models', use_deep_rl=False, use_enhanced_features=False):
         """Initialize the TradingAI system."""
         self.model_dir = model_dir
+        self.use_deep_rl = use_deep_rl and ENHANCED_COMPONENTS_AVAILABLE
+        self.use_enhanced_features = use_enhanced_features and ENHANCED_COMPONENTS_AVAILABLE
+        
+        # Traditional ML components
         self.model = None
         self.scaler = None
         self.last_training_time = None
@@ -38,8 +52,26 @@ class TradingAI:
             'trades_count': 0
         }
 
+        # Enhanced components (if available)
+        if self.use_deep_rl:
+            logger.info("Initializing Deep RL Agent...")
+            self.rl_agent = SoftActorCritic()
+            self.rl_mode = False  # Start with traditional ML
+        
+        if self.use_enhanced_features:
+            logger.info("Initializing Enhanced Feature Extractor...")
+            self.feature_extractor = MultiModalFeatureExtractor()
+        
+        if ENHANCED_COMPONENTS_AVAILABLE:
+            logger.info("Initializing Risk Manager...")
+            self.risk_manager = AdvancedRiskManager()
+        
         # Create model directory if it doesn't exist
         os.makedirs(model_dir, exist_ok=True)
+        
+        # Feature importance tracking
+        self.feature_importance_history = []
+        self.market_regime_history = []
 
     def _prepare_features(self, df):
         """

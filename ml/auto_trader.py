@@ -14,17 +14,33 @@ from ml.trading_ai import TradingAI
 from config.settings import (
     DERIV_API_TOKEN, TRADE_AMOUNT, TRADE_CURRENCY, 
     MAX_DAILY_LOSS, MAX_CONSECUTIVE_LOSSES, CONFIDENCE_THRESHOLD,
-    TRAINING_DAYS, MODEL_UPDATE_FREQUENCY
+    TRAINING_DAYS, MODEL_UPDATE_FREQUENCY, DEEP_RL_CONFIG, RISK_MANAGEMENT_CONFIG
 )
 
-# Configure logging
+# Configure logging first
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger('auto_trader')
+
+# Import new components with graceful fallback
+try:
+    from ml.risk_manager import RiskManager
+    RISK_MANAGER_AVAILABLE = True
+except ImportError:
+    logger.warning("Advanced risk manager not available - using basic risk controls")
+    RISK_MANAGER_AVAILABLE = False
+
+try:
+    from ml.deep_rl_agent import DeepRLAgent
+    DEEP_RL_AVAILABLE = True
+except ImportError:
+    logger.warning("Deep RL agent not available - using traditional ML models")
+    DEEP_RL_AVAILABLE = False
 
 class AutoTrader:
     """
     Automated trading manager that coordinates between the TradingAI and DerivClient
     to execute trades based on generated strategies.
+    Enhanced with advanced risk management and optional deep RL capabilities.
     """
 
     def __init__(self, client: DerivClient, trading_ai: TradingAI):
@@ -36,6 +52,31 @@ class AutoTrader:
         self.loop = None
         self.current_symbol = None
         self.current_granularity = None
+
+        # Initialize advanced components if available
+        self.risk_manager = None
+        self.deep_rl_agent = None
+        
+        if RISK_MANAGER_AVAILABLE and RISK_MANAGEMENT_CONFIG.get('enabled', False):
+            try:
+                self.risk_manager = RiskManager(
+                    initial_balance=self.get_current_balance(),
+                    config=RISK_MANAGEMENT_CONFIG
+                )
+                logger.info("Advanced risk manager initialized")
+            except Exception as e:
+                logger.warning(f"Failed to initialize risk manager: {e}")
+        
+        if DEEP_RL_AVAILABLE and DEEP_RL_CONFIG.get('enabled', False):
+            try:
+                self.deep_rl_agent = DeepRLAgent(
+                    state_dim=DEEP_RL_CONFIG.get('state_dim', 50),
+                    action_dim=DEEP_RL_CONFIG.get('action_dim', 3),
+                    config=DEEP_RL_CONFIG
+                )
+                logger.info("Deep RL agent initialized")
+            except Exception as e:
+                logger.warning(f"Failed to initialize deep RL agent: {e}")
 
         # Risk management
         self.daily_loss = 0.0
@@ -130,7 +171,7 @@ class AutoTrader:
             self._notify_status({"status": "error", "message": message})
             return None
 
-        # Generate strategy
+        # Generate base strategy using traditional ML
         strategy = self.trading_ai.generate_strategy(recent_data, recalculate=recalculate)
 
         if not strategy:
@@ -139,6 +180,53 @@ class AutoTrader:
             self._notify_status({"status": "error", "message": message})
             return None
 
+        # Enhance strategy with deep RL if available
+        if self.deep_rl_agent:
+            try:
+                # Convert recent data to state representation
+                state = self._prepare_rl_state(recent_data)
+                
+                # Get RL action and confidence
+                rl_action, rl_confidence = self.deep_rl_agent.select_action(state, deterministic=True)
+                
+                # Combine ML and RL predictions
+                strategy = self._combine_predictions(strategy, rl_action, rl_confidence)
+                
+                logger.info(f"Enhanced strategy with Deep RL: {strategy['direction']} (confidence: {strategy['confidence']:.2f})")
+                
+            except Exception as e:
+                logger.warning(f"Deep RL enhancement failed: {e}, using base strategy")
+
+        # Apply risk management constraints
+        if self.risk_manager:
+            try:
+                # Check risk constraints before trading
+                risk_check = self.risk_manager.check_trade_risk(
+                    symbol=symbol,
+                    direction=strategy['direction'],
+                    amount=self.current_trade_amount,
+                    confidence=strategy['confidence']
+                )
+                
+                if not risk_check['allowed']:
+                    strategy['risk_blocked'] = True
+                    strategy['risk_reason'] = risk_check['reason']
+                    logger.warning(f"Trade blocked by risk management: {risk_check['reason']}")
+                else:
+                    # Adjust position size based on risk management
+                    recommended_size = self.risk_manager.calculate_position_size(
+                        symbol=symbol,
+                        direction=strategy['direction'],
+                        volatility=strategy.get('volatility', 0.02),
+                        confidence=strategy['confidence']
+                    )
+                    
+                    strategy['recommended_amount'] = recommended_size
+                    strategy['risk_approved'] = True
+                    
+            except Exception as e:
+                logger.warning(f"Risk management check failed: {e}, proceeding with base strategy")
+
         self._notify_status({
             "status": "strategy", 
             "message": f"Strategy generated: {strategy['direction']} with {strategy['confidence']:.2f} confidence",
@@ -146,6 +234,109 @@ class AutoTrader:
         })
 
         return strategy
+
+    def _prepare_rl_state(self, candle_data):
+        """Prepare state representation for deep RL agent."""
+        try:
+            # Use the trading AI's feature extraction if available
+            if hasattr(self.trading_ai, 'feature_extractor') and self.trading_ai.feature_extractor:
+                features = self.trading_ai.feature_extractor.extract_features(candle_data)
+                return features[-1]  # Get latest feature vector
+            else:
+                # Simple state representation using basic technical indicators
+                df = pd.DataFrame(candle_data)
+                
+                # Basic features
+                close_prices = df['close'].values
+                returns = np.diff(close_prices) / close_prices[:-1]
+                
+                # Simple moving averages
+                sma_5 = np.mean(close_prices[-5:])
+                sma_20 = np.mean(close_prices[-20:])
+                
+                # Volatility
+                volatility = np.std(returns[-20:]) if len(returns) >= 20 else 0.02
+                
+                # Price position relative to recent range
+                recent_high = np.max(close_prices[-20:])
+                recent_low = np.min(close_prices[-20:])
+                price_position = (close_prices[-1] - recent_low) / (recent_high - recent_low) if recent_high != recent_low else 0.5
+                
+                # Combine features
+                state = np.array([
+                    returns[-1] if len(returns) > 0 else 0,  # Last return
+                    (close_prices[-1] - sma_5) / sma_5 if sma_5 > 0 else 0,  # Price vs SMA5
+                    (close_prices[-1] - sma_20) / sma_20 if sma_20 > 0 else 0,  # Price vs SMA20
+                    volatility,  # Volatility
+                    price_position,  # Price position in range
+                ])
+                
+                # Pad to expected state dimension
+                target_dim = self.deep_rl_agent.state_dim
+                if len(state) < target_dim:
+                    state = np.concatenate([state, np.zeros(target_dim - len(state))])
+                elif len(state) > target_dim:
+                    state = state[:target_dim]
+                    
+                return state
+                
+        except Exception as e:
+            logger.error(f"Error preparing RL state: {e}")
+            # Return default state
+            return np.zeros(self.deep_rl_agent.state_dim)
+
+    def _combine_predictions(self, ml_strategy, rl_action, rl_confidence):
+        """Combine ML and RL predictions into final strategy."""
+        try:
+            # Map RL action to direction
+            rl_direction_map = {0: 'CALL', 1: 'PUT', 2: 'HOLD'}
+            rl_direction = rl_direction_map.get(rl_action, 'HOLD')
+            
+            # Combine confidences (weighted average)
+            ml_weight = 0.4  # Weight for traditional ML
+            rl_weight = 0.6  # Weight for deep RL
+            
+            if ml_strategy['direction'] == rl_direction:
+                # Predictions agree - boost confidence
+                combined_confidence = min(
+                    ml_weight * ml_strategy['confidence'] + rl_weight * rl_confidence + 0.1,
+                    1.0
+                )
+                final_direction = ml_strategy['direction']
+            else:
+                # Predictions disagree - use higher confidence or fallback to HOLD
+                if rl_confidence > ml_strategy['confidence']:
+                    final_direction = rl_direction
+                    combined_confidence = rl_confidence * 0.8  # Reduce confidence due to disagreement
+                else:
+                    final_direction = ml_strategy['direction']
+                    combined_confidence = ml_strategy['confidence'] * 0.8
+                
+                # If confidence is too low due to disagreement, recommend HOLD
+                if combined_confidence < 0.6:
+                    final_direction = 'HOLD'
+                    combined_confidence = 0.5
+            
+            # Update strategy
+            enhanced_strategy = ml_strategy.copy()
+            enhanced_strategy['direction'] = final_direction
+            enhanced_strategy['confidence'] = combined_confidence
+            enhanced_strategy['ml_prediction'] = {
+                'direction': ml_strategy['direction'],
+                'confidence': ml_strategy['confidence']
+            }
+            enhanced_strategy['rl_prediction'] = {
+                'direction': rl_direction,
+                'confidence': rl_confidence,
+                'action': rl_action
+            }
+            enhanced_strategy['prediction_method'] = 'combined_ml_rl'
+            
+            return enhanced_strategy
+            
+        except Exception as e:
+            logger.error(f"Error combining predictions: {e}")
+            return ml_strategy
 
     async def execute_trade(self, symbol, strategy, amount=None, price=None, use_ai_price=False):
         """
@@ -669,7 +860,7 @@ class AutoTrader:
                 if now >= day_change_time:
                     logger.info("New day started. Resetting daily counters.")
 
-                    # Log daily summary before reset
+                    # Log daily summary
                     daily_summary = {
                         "date": day_change_time.strftime("%Y-%m-%d"),
                         "trades": self.trade_count,

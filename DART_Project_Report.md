@@ -57,7 +57,7 @@
    - [Summary of Findings](#summary-of-findings)
    - [Limitations](#limitations)
    - [Future Work](#future-work)
-10. [References](#references)
+10. [AI Libraries and Modules Documentation](#ai-libraries-and-modules-documentation)
 11. [Appendices](#appendices)
     - [Appendix A: Detailed Algorithm Pseudocode](#appendix-a-detailed-algorithm-pseudocode)
     - [Appendix B: Hyperparameter Tuning Results](#appendix-b-hyperparameter-tuning-results)
@@ -519,15 +519,15 @@ DART employs a robust deployment strategy to ensure reliable operation in produc
 The experimental evaluation of DART was conducted through a comprehensive testing framework:
 
 **Hardware Configuration**:
-- Training: 8x NVIDIA A100 GPUs, 96-core CPU, 768GB RAM
-- Backtesting: 32-core CPU, 256GB RAM, NVMe storage
-- Live testing: Dedicated servers with 99.99% uptime guarantees
+- Training: Modern CPU (8+ cores), 16GB+ RAM, optional GPU for acceleration
+- Development: Standard desktop/laptop hardware (4+ cores, 8GB+ RAM)
+- Production: Dedicated server with reliable internet connection (99.9%+ uptime recommended)
 
 **Software Environment**:
-- Ubuntu 22.04 LTS
-- CUDA 11.8 and cuDNN 8.6
-- Python 3.10 with virtual environments
-- Docker 24.0 with GPU support
+- Ubuntu 22.04 LTS (or Windows/macOS for development)
+- CUDA 11.8 and cuDNN 8.6 (optional, for GPU acceleration)
+- Python 3.13+ with virtual environments
+- Docker 24.0 with GPU support (optional)
 
 **Evaluation Framework**:
 - Walk-forward testing with expanding windows
@@ -625,6 +625,8 @@ DART was benchmarked against several traditional and machine learning-based trad
 2. QuantConnect Alpha Streams (top-performing quant strategies)
 
 ### Performance Analysis
+
+**Disclaimer: The following performance metrics are theoretical projections based on simulated backtesting and are not representative of actual trading results. Real-world trading involves additional risks, costs, and market variables not fully captured in these simulations.**
 
 The experimental results demonstrate DART's effectiveness across various market conditions:
 
@@ -845,6 +847,8 @@ The Deep Adaptive Reinforcement Trader (DART) project has successfully demonstra
 
 The experimental results consistently show that DART outperforms baseline methods across multiple performance metrics, with particular strength during market regime transitions and periods of high volatility. The 18.7% annualized return with a Sharpe ratio of 1.84 represents a significant improvement over both traditional strategies and other machine learning approaches.
 
+**Important Note:** The performance metrics presented in this report are based on simulated backtesting results and theoretical projections. Actual trading performance may vary significantly due to market conditions, execution costs, slippage, and other real-world factors. Past performance does not guarantee future results.
+
 The ablation studies confirm that DART's superior performance stems from the synergistic interaction of its components, with the adaptive mechanisms and multi-modal data integration being particularly important contributors.
 
 ### Limitations
@@ -901,67 +905,332 @@ Several promising directions for future research and development have been ident
 
 The DART project represents a significant step forward in applying adaptive reinforcement learning to financial trading. Its success demonstrates the potential for intelligent systems to navigate the complexity and non-stationarity of financial markets, opening avenues for further research and practical applications in quantitative finance.
 
-## References
+## AI Libraries and Modules Documentation
 
-1. Aboussalah, A. M., & Lee, C. G. (2020). "Continuous control with stacked deep dynamic recurrent reinforcement learning for portfolio optimization." Expert Systems with Applications, 140, 112891.
+This section documents the artificial intelligence libraries, frameworks, and modules utilized in the DART trading system, providing comprehensive information about their implementation, usage, and official resources.
 
-2. Almahdi, S., & Yang, S. Y. (2019). "An adaptive portfolio trading system: A risk-return portfolio optimization using recurrent reinforcement learning with expected maximum drawdown." Expert Systems with Applications, 126, 122-141.
+### 1. PyTorch
+**Version:** 2.0.0+  
+**Purpose:** Deep learning framework for neural network implementation and reinforcement learning agents  
+**Usage in DART:** Core framework powering the Deep RL Agent with Soft Actor-Critic algorithm, attention mechanisms, and neural network architectures  
 
-3. Arjovsky, M., Chintala, S., & Bottou, L. (2017). "Wasserstein generative adversarial networks." International conference on machine learning, 214-223.
+**Key Components Used:**
+```python
+import torch
+import torch.nn as nn
+import torch.optim as optim
+import torch.nn.functional as F
+```
 
-4. Bacoyannis, V., Glukhov, V., Jin, T., Kochems, J., & Song, D. R. (2018). "Idiosyncrasies and challenges of data driven learning in electronic trading." NeurIPS Workshop on Challenges and Opportunities for AI in Financial Services.
+**Features in DART:**
+- Neural network layers and modules for actor-critic networks
+- Optimization algorithms (Adam, SGD) for model training
+- Activation functions and loss functions for deep learning
+- GPU acceleration for training and inference
+- Automatic differentiation for gradient computation
 
-5. Bellemare, M. G., Dabney, W., & Munos, R. (2017). "A distributional perspective on reinforcement learning." International Conference on Machine Learning, 449-458.
+**Documentation:** [https://pytorch.org/docs/stable/](https://pytorch.org/docs/stable/)  
+**Tutorials:** [https://pytorch.org/tutorials/](https://pytorch.org/tutorials/)  
+**GitHub:** [https://github.com/pytorch/pytorch](https://github.com/pytorch/pytorch)
 
-6. Bengio, Y., Louradour, J., Collobert, R., & Weston, J. (2009). "Curriculum learning." In Proceedings of the 26th annual international conference on machine learning, 41-48.
+### 2. Scikit-learn
+**Version:** 1.6.1+  
+**Purpose:** Traditional machine learning algorithms and preprocessing tools  
+**Usage in DART:** Primary ML engine in TradingAI module for ensemble methods, classification, and feature processing  
 
-7. Britz, D., Goldie, A., Luong, M. T., & Le, Q. (2017). "Massive exploration of neural machine translation architectures." arXiv preprint arXiv:1703.03906.
+**Key Components Used:**
+```python
+from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
+from sklearn.linear_model import LogisticRegression
+from sklearn.preprocessing import StandardScaler
+from sklearn.pipeline import Pipeline
+from sklearn.model_selection import train_test_split, cross_val_score
+from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
+```
 
-8. Buehler, H., Gonon, L., Teichmann, J., & Wood, B. (2019). "Deep hedging." Quantitative Finance, 19(8), 1271-1291.
+**Features in DART:**
+- RandomForestClassifier for ensemble learning and robust pattern recognition
+- GradientBoostingClassifier for sequential learning of complex relationships
+- LogisticRegression as linear baseline model for interpretable decisions
+- StandardScaler for feature normalization and preprocessing
+- Pipeline for ML workflow automation
+- Model validation and performance metrics
 
-9. Chakraborty, S. (2021). "A deep reinforcement learning approach to algorithmic trading." In International Conference on Artificial Intelligence and Statistics, 3999-4009.
+**Documentation:** [https://scikit-learn.org/stable/](https://scikit-learn.org/stable/)  
+**User Guide:** [https://scikit-learn.org/stable/user_guide.html](https://scikit-learn.org/stable/user_guide.html)  
+**GitHub:** [https://github.com/scikit-learn/scikit-learn](https://github.com/scikit-learn/scikit-learn)
 
-10. Chung, J., Gulcehre, C., Cho, K., & Bengio, Y. (2014). "Empirical evaluation of gated recurrent neural networks on sequence modeling." arXiv preprint arXiv:1412.3555.
+### 3. TA-Lib (via ta package)
+**Version:** 0.11.0+  
+**Purpose:** Technical analysis indicators for financial market data  
+**Usage in DART:** Comprehensive technical indicator calculation in TradingAI and Feature Extractor modules  
 
-11. Fischer, T. G. (2018). "Reinforcement learning in financial markets - a survey." FAU Discussion Papers in Economics, No. 12/2018.
+**Key Indicators Implemented:**
+- **Trend Indicators:** MACD, SMA, EMA, ADX
+- **Momentum Indicators:** RSI, Stochastic Oscillator, Williams %R
+- **Volatility Indicators:** Bollinger Bands, ATR, CCI
+- **Volume Indicators:** VWAP, OBV, Money Flow Index
 
-12. Gao, X., & Chan, L. (2000). "An algorithm for trading and portfolio management using Q-learning and sharpe ratio maximization." In Proceedings of the international conference on neural information processing, 832-837.
+**Components Used:**
+```python
+import ta
+from ta.trend import MACD, SMAIndicator, EMAIndicator
+from ta.momentum import RSIIndicator, StochasticOscillator
+from ta.volatility import BollingerBands, AverageTrueRange
+from ta.volume import VolumeWeightedAveragePrice, OnBalanceVolumeIndicator
+```
 
-13. Haarnoja, T., Zhou, A., Abbeel, P., & Levine, S. (2018). "Soft actor-critic: Off-policy maximum entropy deep reinforcement learning with a stochastic actor." International Conference on Machine Learning, 1861-1870.
+**Documentation:** [https://technical-analysis-library-in-python.readthedocs.io/](https://technical-analysis-library-in-python.readthedocs.io/)  
+**GitHub:** [https://github.com/bukosabino/ta](https://github.com/bukosabino/ta)  
+**PyPI:** [https://pypi.org/project/ta/](https://pypi.org/project/ta/)
 
-14. Jiang, Z., Xu, D., & Liang, J. (2017). "A deep reinforcement learning framework for the financial portfolio management problem." arXiv preprint arXiv:1706.10059.
+### 4. Pandas
+**Version:** 2.2.3+  
+**Purpose:** Data manipulation and analysis for financial time series  
+**Usage in DART:** Core data structure for all market data processing, feature engineering, and backtesting operations  
 
-15. Lillicrap, T. P., Hunt, J. J., Pritzel, A., Heess, N., Erez, T., Tassa, Y., Silver, D., & Wierstra, D. (2015). "Continuous control with deep reinforcement learning." arXiv preprint arXiv:1509.02971.
+**Key Features Used:**
+```python
+import pandas as pd
+```
 
-16. López de Prado, M. (2018). "Advances in Financial Machine Learning." John Wiley & Sons.
+**Features in DART:**
+- DataFrame operations for OHLCV data manipulation
+- Time series analysis and resampling for different timeframes
+- Rolling window calculations for technical indicators
+- Data cleaning and preprocessing pipelines
+- Efficient data aggregation and transformation
 
-17. Mnih, V., Kavukcuoglu, K., Silver, D., Rusu, A. A., Veness, J., Bellemare, M. G., ... & Hassabis, D. (2015). "Human-level control through deep reinforcement learning." Nature, 518(7540), 529-533.
+**Documentation:** [https://pandas.pydata.org/docs/](https://pandas.pydata.org/docs/)  
+**Getting Started:** [https://pandas.pydata.org/docs/getting_started/](https://pandas.pydata.org/docs/getting_started/)  
+**GitHub:** [https://github.com/pandas-dev/pandas](https://github.com/pandas-dev/pandas)
 
-18. Moody, J., & Saffell, M. (2001). "Learning to trade via direct reinforcement." IEEE transactions on neural networks, 12(4), 875-889.
+### 5. NumPy
+**Version:** 1.24.0+  
+**Purpose:** Numerical computing and array operations  
+**Usage in DART:** Foundation for all mathematical computations, statistical analysis, and matrix operations  
 
-19. Nevmyvaka, Y., Feng, Y., & Kearns, M. (2006). "Reinforcement learning for optimized trade execution." In Proceedings of the 23rd international conference on Machine learning, 673-680.
+**Key Features Used:**
+```python
+import numpy as np
+```
 
-20. Schulman, J., Wolski, F., Dhariwal, P., Radford, A., & Klimov, O. (2017). "Proximal policy optimization algorithms." arXiv preprint arXiv:1707.06347.
+**Features in DART:**
+- Array operations for efficient numerical computation
+- Statistical functions for risk metrics calculation
+- Random number generation for Monte Carlo simulations
+- Linear algebra operations for portfolio optimization
+- Mathematical functions for financial calculations
 
-21. Silver, D., Lever, G., Heess, N., Degris, T., Wierstra, D., & Riedmiller, M. (2014). "Deterministic policy gradient algorithms." In International conference on machine learning, 387-395.
+**Documentation:** [https://numpy.org/doc/stable/](https://numpy.org/doc/stable/)  
+**User Guide:** [https://numpy.org/doc/stable/user/index.html](https://numpy.org/doc/stable/user/index.html)  
+**GitHub:** [https://github.com/numpy/numpy](https://github.com/numpy/numpy)
 
-22. Sutton, R. S., & Barto, A. G. (2018). "Reinforcement learning: An introduction." MIT press.
+### 6. TextBlob
+**Version:** 0.17.1+  
+**Purpose:** Natural language processing for sentiment analysis  
+**Usage in DART:** News sentiment analysis in Multi-Modal Feature Extractor for alternative data processing  
 
-23. Tsay, R. S. (2005). "Analysis of financial time series." John Wiley & Sons.
+**Key Features Used:**
+```python
+from textblob import TextBlob
+```
 
-24. Vaswani, A., Shazeer, N., Parmar, N., Uszkoreit, J., Jones, L., Gomez, A. N., ... & Polosukhin, I. (2017). "Attention is all you need." Advances in neural information processing systems, 5998-6008.
+**Features in DART:**
+- Sentiment polarity scoring for financial news
+- Text preprocessing and tokenization
+- Named entity recognition for financial entities
+- Language detection and processing
+- Subjectivity analysis for news content
 
-25. Wang, Y., & Zhou, D. (2019). "Deep reinforcement learning in quantitative algorithmic trading: A review." arXiv preprint arXiv:1908.10715.
+**Documentation:** [https://textblob.readthedocs.io/](https://textblob.readthedocs.io/)  
+**Quickstart:** [https://textblob.readthedocs.io/en/dev/quickstart.html](https://textblob.readthedocs.io/en/dev/quickstart.html)  
+**GitHub:** [https://github.com/sloria/TextBlob](https://github.com/sloria/TextBlob)
 
-26. Zhang, X., Zhang, Y., Wang, S., Yao, Y., Fang, B., & Philip, S. Y. (2018). "Improving stock market prediction via heterogeneous information fusion." Knowledge-Based Systems, 143, 236-247.
+### 7. Matplotlib
+**Version:** 3.10.1+  
+**Purpose:** Data visualization and plotting  
+**Usage in DART:** Performance charts, technical analysis plots, and risk visualization in the UI module  
 
-27. Xiong, Z., Liu, X. Y., Zhong, S., Yang, H., & Walid, A. (2018). "Practical deep reinforcement learning approach for stock trading." arXiv preprint arXiv:1811.07522.
+**Key Features Used:**
+```python
+import matplotlib.pyplot as plt
+import matplotlib.dates as mdates
+```
 
-28. Yu, P., Lee, J. S., Kulyatin, I., Shi, Z., & Dasgupta, S. (2019). "Model-based deep reinforcement learning for dynamic portfolio optimization." arXiv preprint arXiv:1901.08740.
+**Features in DART:**
+- Time series plotting for price data visualization
+- Multi-subplot layouts for comprehensive analysis
+- Real-time chart updates for live trading
+- Custom styling for professional trading interfaces
+- Performance and risk metric visualization
 
-29. Zhu, H., Wang, Y., Wang, K., & Chen, Y. (2020). "Deep reinforcement learning for portfolio management based on the empirical study of chinese stock market." IEEE Access, 8, 140796-140809.
+**Documentation:** [https://matplotlib.org/stable/](https://matplotlib.org/stable/)  
+**Tutorials:** [https://matplotlib.org/stable/tutorials/index.html](https://matplotlib.org/stable/tutorials/index.html)  
+**GitHub:** [https://github.com/matplotlib/matplotlib](https://github.com/matplotlib/matplotlib)
 
-30. Zoph, B., & Le, Q. V. (2017). "Neural architecture search with reinforcement learning." International Conference on Learning Representations.
+### 8. mplfinance
+**Version:** 0.12.10b0+  
+**Purpose:** Specialized financial plotting library  
+**Usage in DART:** Candlestick charts, volume analysis, and technical indicator overlays  
+
+**Key Features Used:**
+```python
+import mplfinance as mpf
+```
+
+**Features in DART:**
+- OHLC candlestick visualization
+- Volume bar charts
+- Technical indicator overlays
+- Multi-timeframe chart analysis
+- Financial chart styling and customization
+
+**Documentation:** [https://github.com/matplotlib/mplfinance](https://github.com/matplotlib/mplfinance)  
+**Examples:** [https://github.com/matplotlib/mplfinance/tree/master/examples](https://github.com/matplotlib/mplfinance/tree/master/examples)  
+**Wiki:** [https://github.com/matplotlib/mplfinance/wiki](https://github.com/matplotlib/mplfinance/wiki)
+
+### 9. CustomTkinter
+**Version:** 5.2.2+  
+**Purpose:** Modern GUI framework for desktop applications  
+**Usage in DART:** Main user interface for the trading application with modern styling and themes  
+
+**Key Features Used:**
+```python
+import customtkinter as ctk
+```
+
+**Features in DART:**
+- Modern widget styling and themes (dark/light mode)
+- Responsive layout management
+- Real-time data display components
+- Interactive trading controls and settings
+- Professional desktop application interface
+
+**Documentation:** [https://customtkinter.tomschimansky.com/](https://customtkinter.tomschimansky.com/)  
+**GitHub:** [https://github.com/TomSchimansky/CustomTkinter](https://github.com/TomSchimansky/CustomTkinter)  
+**Examples:** [https://github.com/TomSchimansky/CustomTkinter/tree/master/examples](https://github.com/TomSchimansky/CustomTkinter/tree/master/examples)
+
+### 10. Joblib
+**Version:** 1.3.0+  
+**Purpose:** Model serialization and parallel processing  
+**Usage in DART:** Saving and loading trained ML models for production deployment  
+
+**Key Features Used:**
+```python
+import joblib
+```
+
+**Features in DART:**
+- Efficient model serialization with compression
+- Parallel processing for feature computation
+- Memory-efficient data loading and processing
+- Cross-platform model compatibility
+- Fast model persistence for production systems
+
+**Documentation:** [https://joblib.readthedocs.io/](https://joblib.readthedocs.io/)  
+**User Guide:** [https://joblib.readthedocs.io/en/latest/index.html](https://joblib.readthedocs.io/en/latest/index.html)  
+**GitHub:** [https://github.com/joblib/joblib](https://github.com/joblib/joblib)
+
+### 11. Python Deriv API
+**Version:** 0.1.6+  
+**Purpose:** WebSocket-based API client for Deriv trading platform  
+**Usage in DART:** Real-time market data streaming and trade execution through DerivClient  
+
+**Key Features Used:**
+```python
+from deriv_api import DerivAPI
+```
+
+**Features in DART:**
+- WebSocket connections for real-time market data
+- Order placement and management
+- Account balance and position tracking
+- Historical data retrieval
+- Streaming price updates and market events
+
+**Documentation:** [https://github.com/deriv-com/python-deriv-api](https://github.com/deriv-com/python-deriv-api)  
+**API Reference:** [https://developers.deriv.com/](https://developers.deriv.com/)  
+**Examples:** [https://github.com/deriv-com/python-deriv-api/tree/master/examples](https://github.com/deriv-com/python-deriv-api/tree/master/examples)
+
+### 12. Requests
+**Version:** 2.31.0+  
+**Purpose:** HTTP library for API communications  
+**Usage in DART:** Alternative data source integration and external API calls  
+
+**Key Features Used:**
+```python
+import requests
+```
+
+**Features in DART:**
+- RESTful API communications for external data sources
+- HTTP session management with connection pooling
+- Request/response handling with comprehensive error management
+- JSON data processing for external APIs
+- Authentication and header management
+
+**Documentation:** [https://requests.readthedocs.io/](https://requests.readthedocs.io/)  
+**Quickstart:** [https://requests.readthedocs.io/en/latest/user/quickstart/](https://requests.readthedocs.io/en/latest/user/quickstart/)  
+**GitHub:** [https://github.com/psf/requests](https://github.com/psf/requests)
+
+### Optional Enhanced Libraries
+
+### 13. Transformers (Optional)
+**Version:** 4.30.0+ (optional dependency)  
+**Purpose:** State-of-the-art NLP models for advanced sentiment analysis  
+**Usage in DART:** Enhanced news sentiment analysis with pre-trained language models  
+
+**Potential Applications:**
+- Financial BERT models for market sentiment analysis
+- Multi-language sentiment analysis for global markets
+- Entity-aware sentiment scoring for specific assets
+- Context-aware text classification for news impact
+
+**Documentation:** [https://huggingface.co/docs/transformers/](https://huggingface.co/docs/transformers/)  
+**Model Hub:** [https://huggingface.co/models](https://huggingface.co/models)  
+**GitHub:** [https://github.com/huggingface/transformers](https://github.com/huggingface/transformers)
+
+### 14. TensorBoard (Optional)
+**Version:** 2.13.0+ (optional dependency)  
+**Purpose:** Visualization toolkit for machine learning experiments  
+**Usage in DART:** Training monitoring and model performance visualization  
+
+**Features for DART:**
+- Loss curve visualization for RL training
+- Hyperparameter optimization tracking
+- Model architecture visualization
+- Performance metric dashboards
+- Training progress monitoring
+
+**Documentation:** [https://www.tensorflow.org/tensorboard](https://www.tensorflow.org/tensorboard)  
+**GitHub:** [https://github.com/tensorflow/tensorboard](https://github.com/tensorflow/tensorboard)  
+**Tutorials:** [https://www.tensorflow.org/tensorboard/get_started](https://www.tensorflow.org/tensorboard/get_started)
+
+### Custom DART Modules
+
+### 15. DART Core AI Modules
+**Location:** `ml/` directory  
+**Purpose:** Custom-built AI components specifically designed for trading applications  
+
+**Core Components:**
+- **`trading_ai.py`** - Main ML engine with ensemble methods and technical analysis
+- **`deep_rl_agent.py`** - Soft Actor-Critic implementation with attention mechanisms
+- **`feature_extractor.py`** - Multi-modal feature engineering and data processing
+- **`risk_manager.py`** - Advanced risk management with VaR and stress testing
+- **`auto_trader.py`** - AI coordination and trade execution management
+
+**Custom Implementations:**
+- Attention-based neural networks for temporal financial sequences
+- Market regime detection algorithms for adaptive trading
+- Risk-aware reinforcement learning with financial constraints
+- Multi-modal data fusion techniques for alternative data
+- Adaptive learning mechanisms for non-stationary markets
+
+**Internal Documentation:** Available in module docstrings and code comments  
+**Source Code:** Located in the `ml/` directory of the DART project
+
+This comprehensive integration of AI libraries and frameworks provides DART with robust, scalable, and maintainable artificial intelligence capabilities for sophisticated financial trading applications.
 
 ## Appendices
 
