@@ -1,10 +1,10 @@
 """Configuration settings for the DART application."""
 
 # Deriv API settings
-DERIV_APP_ID = '0000' # Change it to your app ID
+DERIV_APP_ID = '72212' # Change it to your app ID
 # You need a valid API token from Deriv.com to execute trades
 # Get your API token from: https://app.deriv.com/account/api-token
-DERIV_API_TOKEN = '0000'    # Replace with your valid API token
+DERIV_API_TOKEN = 'smZcz06owgJBfQ8'    # Replace with your valid API token
 
 # Auto-trading settings
 AUTO_TRADE_ENABLED = False  # Default to disabled
