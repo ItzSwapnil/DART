@@ -107,14 +107,17 @@ class DerivClient:
                 # Update account info after successful authorization
                 self.account_info = auth_response.get("authorize", {})
 
-            # Calculate start time (days ago from now)
-            end_time = int(datetime.datetime.now().timestamp())
-            start_time = end_time - (days * 24 * 60 * 60)
-
+            # Calculate count based on granularity and days
+            # granularity is in seconds, so calculate how many candles in the given days
+            seconds_per_day = 24 * 60 * 60
+            total_seconds = days * seconds_per_day
+            count = min(total_seconds // granularity, 5000)  # Cap at 5000 to avoid API limits
+            
+            # Use the same format as get_candles but with more data
             response = await api.ticks_history({
                 "ticks_history": symbol,
-                "start": start_time,
-                "end": end_time,
+                "count": int(count),
+                "end": "latest",
                 "style": "candles",
                 "granularity": granularity
             })
