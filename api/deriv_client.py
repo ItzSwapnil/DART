@@ -1,16 +1,19 @@
-import asyncio
-import datetime
 import logging
+from datetime import UTC, datetime
+
 from deriv_api import DerivAPI
 
 # Configure logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-logger = logging.getLogger('deriv_client')
+logging.basicConfig(
+    level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+)
+logger = logging.getLogger("deriv_client")
+
 
 class DerivClient:
     """Client for interacting with the Deriv API."""
 
-    def __init__(self, app_id='70789', api_token=None):
+    def __init__(self, app_id="70789", api_token=None):
         self.app_id = app_id
         self.api_token = api_token
         self.active_trades = {}  # Dictionary to track active trades
@@ -43,19 +46,21 @@ class DerivClient:
                 # Update account info after successful authorization
                 self.account_info = auth_response.get("authorize", {})
 
-            response = await api.active_symbols({"active_symbols": "brief", "product_type": "basic"})
-            active_symbols = response.get('active_symbols', [])
+            response = await api.active_symbols(
+                {"active_symbols": "brief", "product_type": "basic"},
+            )
+            active_symbols = response.get("active_symbols", [])
             symbols_dict = {}
             for symbol in active_symbols:
                 # Check if the market is closed
-                is_closed = not symbol.get('exchange_is_open', True)
+                is_closed = not symbol.get("exchange_is_open", True)
                 market_name = f"{symbol['market_display_name']} - {symbol['display_name']}"
 
                 # Add closed indicator to market name if closed
                 if is_closed:
                     market_name = f"{market_name} [CLOSED]"
 
-                symbols_dict[market_name] = symbol['symbol']
+                symbols_dict[market_name] = symbol["symbol"]
             return symbols_dict
         except Exception as e:
             print(f"Error fetching active symbols: {e}")
@@ -78,14 +83,16 @@ class DerivClient:
                 # Update account info after successful authorization
                 self.account_info = auth_response.get("authorize", {})
 
-            response = await api.ticks_history({
-                "ticks_history": symbol,
-                "count": count,
-                "end": "latest",
-                "style": "candles",
-                "granularity": granularity
-            })
-            return response.get('candles', [])
+            response = await api.ticks_history(
+                {
+                    "ticks_history": symbol,
+                    "count": count,
+                    "end": "latest",
+                    "style": "candles",
+                    "granularity": granularity,
+                },
+            )
+            return response.get("candles", [])
         except Exception as e:
             print(f"Error fetching candles: {e}")
             return []
@@ -112,21 +119,25 @@ class DerivClient:
             seconds_per_day = 24 * 60 * 60
             total_seconds = days * seconds_per_day
             count = min(total_seconds // granularity, 5000)  # Cap at 5000 to avoid API limits
-            
+
             # Use the same format as get_candles but with more data
-            response = await api.ticks_history({
-                "ticks_history": symbol,
-                "count": int(count),
-                "end": "latest",
-                "style": "candles",
-                "granularity": granularity
-            })
-            return response.get('candles', [])
+            response = await api.ticks_history(
+                {
+                    "ticks_history": symbol,
+                    "count": int(count),
+                    "end": "latest",
+                    "style": "candles",
+                    "granularity": granularity,
+                },
+            )
+            return response.get("candles", [])
         except Exception as e:
             print(f"Error fetching historical data: {e}")
             return []
 
-    async def get_contract_proposal(self, symbol, contract_type, amount, duration, duration_unit="s"):
+    async def get_contract_proposal(
+        self, symbol, contract_type, amount, duration, duration_unit="s",
+    ):
         """
         Get a contract proposal to check if the trade is valid and get max stake limits.
 
@@ -168,7 +179,7 @@ class DerivClient:
                 "currency": "USD",
                 "duration": duration,
                 "duration_unit": duration_unit,
-                "symbol": symbol
+                "symbol": symbol,
             }
 
             print(f"Requesting proposal with parameters: {proposal_params}")
@@ -185,7 +196,9 @@ class DerivClient:
             print(error_msg)
             return {"error": {"message": error_msg}}
 
-    async def buy_contract(self, symbol, contract_type, amount, duration, duration_unit="s", price=None):
+    async def buy_contract(
+        self, symbol, contract_type, amount, duration, duration_unit="s", price=None,
+    ):
         """
         Buy a contract with the specified parameters.
 
@@ -220,7 +233,9 @@ class DerivClient:
             self.account_info = auth_response.get("authorize", {})
 
             # Check if the stake amount exceeds the maximum purchase price
-            proposal = await self.get_contract_proposal(symbol, contract_type, amount, duration, duration_unit)
+            proposal = await self.get_contract_proposal(
+                symbol, contract_type, amount, duration, duration_unit,
+            )
 
             if "error" in proposal:
                 # If there's an error with the proposal, check if it's related to the stake amount
@@ -228,7 +243,8 @@ class DerivClient:
                 if "stake" in error_msg.lower() and "maximum" in error_msg.lower():
                     # Try to extract the maximum stake from the error message
                     import re
-                    max_stake_match = re.search(r'maximum.*?(\d+(\.\d+)?)', error_msg)
+
+                    max_stake_match = re.search(r"maximum.*?(\d+(\.\d+)?)", error_msg)
                     if max_stake_match:
                         max_stake = float(max_stake_match.group(1))
                         print(f"Reducing stake amount from {amount} to {max_stake}")
@@ -254,9 +270,7 @@ class DerivClient:
                 print(f"No price provided for {symbol}, attempting to get current market price")
                 # Get the latest tick to determine current price
                 # Note: We don't use the "subscribe" parameter here as it causes validation errors
-                tick_response = await api.ticks({
-                    "ticks": symbol
-                })
+                tick_response = await api.ticks({"ticks": symbol})
 
                 if "error" in tick_response:
                     error_msg = f"Error getting current price: {tick_response['error']['message']}"
@@ -292,8 +306,8 @@ class DerivClient:
                     "currency": "USD",
                     "duration": duration,
                     "duration_unit": duration_unit,
-                    "symbol": symbol
-                }
+                    "symbol": symbol,
+                },
             }
 
             print(f"Using price: {price} for contract purchase")
@@ -317,7 +331,7 @@ class DerivClient:
                     "duration_unit": duration_unit,
                     "buy_response": response,
                     "status": "open",
-                    "start_time": datetime.datetime.now()
+                    "start_time": datetime.now(tz=UTC),
                 }
 
             return response
@@ -345,9 +359,7 @@ class DerivClient:
             # Update account info after successful authorization
             self.account_info = auth_response.get("authorize", {})
 
-            response = await api.proposal_open_contract({
-                "contract_id": contract_id
-            })
+            response = await api.proposal_open_contract({"contract_id": contract_id})
 
             if "error" in response:
                 print(f"Error checking trade status: {response['error']['message']}")
@@ -362,7 +374,7 @@ class DerivClient:
                 # Check if the contract is finished
                 if contract_info.get("status") in ["sold", "expired"]:
                     self.active_trades[contract_id]["status"] = "closed"
-                    self.active_trades[contract_id]["end_time"] = datetime.datetime.now()
+                    self.active_trades[contract_id]["end_time"] = datetime.now(tz=UTC)
 
                     # Calculate profit/loss
                     buy_price = contract_info.get("buy_price", 0)
@@ -476,10 +488,7 @@ class DerivClient:
                 self.account_info = auth_response.get("authorize", {})
 
             # Query contracts_for endpoint to get available contracts
-            response = await api.contracts_for({
-                "contracts_for": symbol,
-                "currency": "USD"
-            })
+            response = await api.contracts_for({"contracts_for": symbol, "currency": "USD"})
 
             if "error" in response:
                 error_msg = f"Error getting contracts: {response['error']['message']}"
@@ -502,7 +511,21 @@ class DerivClient:
                         max_seconds = self._duration_to_seconds(max_duration)
 
                         # Generate a list of standard durations within the range
-                        standard_durations = [30, 60, 120, 180, 300, 600, 900, 1800, 3600, 7200, 14400, 28800, 86400]
+                        standard_durations = [
+                            30,
+                            60,
+                            120,
+                            180,
+                            300,
+                            600,
+                            900,
+                            1800,
+                            3600,
+                            7200,
+                            14400,
+                            28800,
+                            86400,
+                        ]
                         for duration in standard_durations:
                             if min_seconds <= duration <= max_seconds:
                                 available_durations.append(duration)
@@ -511,7 +534,9 @@ class DerivClient:
             available_durations = sorted(list(set(available_durations)))
 
             if not available_durations:
-                logger.warning(f"No available durations found for {symbol} with contract type {contract_type}")
+                logger.warning(
+                    f"No available durations found for {symbol} with contract type {contract_type}",
+                )
 
             return available_durations
 
@@ -537,13 +562,13 @@ class DerivClient:
         value = int(duration_str[:-1])
 
         # Convert to seconds based on unit
-        if unit == 's':
+        if unit == "s":
             return value
-        elif unit == 'm':
+        elif unit == "m":
             return value * 60
-        elif unit == 'h':
+        elif unit == "h":
             return value * 3600
-        elif unit == 'd':
+        elif unit == "d":
             return value * 86400
         else:
             logger.warning(f"Unknown duration unit: {unit}")

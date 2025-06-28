@@ -1,1 +1,46 @@
-# Config package initialization
+"""Configuration package for DART trading platform.
+
+Provides application settings and configuration values.
+"""
+
+from config.settings import (
+    # API Settings
+    DERIV_APP_ID,
+    DERIV_API_TOKEN,
+    # Trading Settings
+    AUTO_TRADE_ENABLED,
+    CONFIDENCE_THRESHOLD,
+    MAX_CONSECUTIVE_LOSSES,
+    MAX_DAILY_LOSS,
+    TRADE_AMOUNT,
+    TRADE_CURRENCY,
+    TRADE_DURATION_SECONDS,
+    TRAINING_DAYS,
+    # Feature Flags
+    USE_ADVANCED_RISK_MANAGEMENT,
+    USE_DEEP_RL,
+    USE_ENHANCED_FEATURES,
+    # UI Settings
+    DEFAULT_CANDLE_COUNT,
+    DEFAULT_THEME,
+    DEFAULT_TIMEFRAME,
+)
+
+__all__ = [
+    "DERIV_APP_ID",
+    "DERIV_API_TOKEN",
+    "AUTO_TRADE_ENABLED",
+    "CONFIDENCE_THRESHOLD",
+    "MAX_CONSECUTIVE_LOSSES",
+    "MAX_DAILY_LOSS",
+    "TRADE_AMOUNT",
+    "TRADE_CURRENCY",
+    "TRADE_DURATION_SECONDS",
+    "TRAINING_DAYS",
+    "USE_ADVANCED_RISK_MANAGEMENT",
+    "USE_DEEP_RL",
+    "USE_ENHANCED_FEATURES",
+    "DEFAULT_CANDLE_COUNT",
+    "DEFAULT_THEME",
+    "DEFAULT_TIMEFRAME",
+]

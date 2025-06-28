@@ -1,55 +1,102 @@
 [project]
 name = "dart"
-version = "0.2.0"
+version = "2.0.1"
 description = "Deep Adaptive Reinforcement Trader - An advanced AI trading system"
-requires-python = ">=3.13"
+requires-python = ">=3.14"
 dependencies = [
+    # Core async - built-in in Python 3.14, kept for explicit dependency
     "asyncio>=3.4.3",
+    
+    # UI Framework
     "customtkinter>=5.2.2",
-    "matplotlib>=3.10.1",
+    "sv-ttk>=2.6.1",
+    
+    # Data Visualization
+    "matplotlib>=3.10.8",
     "mplfinance>=0.12.10b0",
-    "pandas>=2.2.3",
-    "python-deriv-api>=0.1.6",
-    "scikit-learn>=1.6.1",
-    "sv-ttk>=2.6.0",
+    "plotly>=6.5.1",
+    
+    # Data Processing
+    "pandas>=2.3.3",
+    "numpy>=2.4.0",
+    
+    # Machine Learning
+    "scikit-learn>=1.8.0",
+    "joblib>=1.5.0",
+    
+    # Deep Learning (PyTorch ecosystem)
+    "torch>=2.9.1",
+    "torchvision>=0.22.0",
+    "torchaudio>=2.9.0",
+    
+    # Technical Analysis
     "ta>=0.11.0",
+    
+    # API & Networking
+    "python-deriv-api>=0.1.6",
+    "requests>=2.32.0",
+    
+    # NLP & Sentiment
+    "textblob>=0.19.0",
+    
+    # Web Dashboard
+    "streamlit>=1.52.0",
+    
+    # Tkinter (system dependency wrapper)
     "tk>=0.1.0",
-    "numpy>=1.24.0",
-    "joblib>=1.3.0",
-    "requests>=2.31.0",
-    "textblob>=0.17.1",
-    "torch>=2.0.0",
-    "torchvision>=0.15.0",
-    "torchaudio>=2.0.0",
 ]
 
 [project.optional-dependencies]
 dev = [
-    "pytest>=7.0.0",
-    "black>=23.0.0",
-    "flake8>=6.0.0",
-    "mypy>=1.0.0",
+    "pytest>=9.0.2",
+    "black>=25.12.0",
+    "flake8>=7.3.0",
+    "mypy>=1.19.1",
+    "ruff>=0.9.0",
+    "pre-commit>=4.0.0",
 ]
 
 deep-learning = [
-    "torch>=2.0.0",
-    "torchvision>=0.15.0",
-    "torchaudio>=2.0.0",
-    "transformers>=4.30.0",
-    "tensorboard>=2.13.0",
+    "torch>=2.9.1",
+    "torchvision>=0.22.0",
+    "torchaudio>=2.9.0",
+    "transformers>=5.0.0rc0",
+    "tensorboard>=2.19.0",
+    "accelerate>=1.3.0",
 ]
 
+# Note: yfinance has websockets version conflict with python-deriv-api
+# Install separately if needed: pip install yfinance
 data-sources = [
-    "yfinance>=0.2.0",
-    "alpha-vantage>=2.3.0",
-    "newsapi-python>=0.2.6",
-    "tweepy>=4.14.0",
-    "praw>=7.7.0",
+    "alpha-vantage>=3.0.0",
+    "newsapi-python>=0.2.7",
+    "tweepy>=4.16.0",
+    "praw>=7.8.1",
 ]
 
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling>=1.27.0"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["api", "config", "ml", "ui", "utils"]
+
+[tool.black]
+line-length = 100
+target-version = ["py314"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py314"
+
+[tool.mypy]
+python_version = "3.14"
+warn_return_any = true
+warn_unused_configs = true
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_functions = ["test_*"]
+addopts = "-v --tb=short"
