@@ -148,3 +148,11 @@ Thumbs.db
 *.profile
 *.dump
 *.dmp
+
+
+# Project Report 
+# ===============
+
+Project_Report/*
+
+Project_Report_Guidelines/*
