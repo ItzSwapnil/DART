@@ -1,6 +1,7 @@
 """
 DART Launcher - Choose Your Interface
-Provides options to launch either the modern web dashboard or classic desktop interface.
+Provides options to launch either the modern web dashboard or classic
+desktop interface.
 """
 
 import datetime
@@ -33,6 +34,15 @@ class DARTLauncher:
         self.streamlit_process = None
         self.desktop_process = None
         self.log_buffer = []
+
+        # UI Components (initialized in setup_logs_tab)
+        self.web_logs_frame = None
+        self.web_logs_text = None
+        self.desktop_logs_frame = None
+        self.desktop_logs_text = None
+        self.system_logs_frame = None
+        self.system_logs_text = None
+        self.auto_scroll_var = None
 
     def center_window(self):
         """Center the launcher window on screen."""
@@ -96,7 +106,8 @@ class DARTLauncher:
         self.create_option_card(
             selection_frame,
             "🚀 Modern Web Dashboard",
-            "Professional web-based interface with real-time charts, AI insights, and modern UI",
+            "Professional web-based interface with real-time charts, AI "
+            "insights, and modern UI",
             [
                 "• Real-time interactive charts with Plotly",
                 "• Modern responsive design",
@@ -139,7 +150,10 @@ class DARTLauncher:
 
         footer_label = tk.Label(
             footer_frame,
-            text="⚡ Both interfaces connect to the same AI trading engine\n🔒 Your settings and models are shared between interfaces",
+            text=(
+                "⚡ Both interfaces connect to the same AI trading engine\n"
+                "🔒 Your settings and models are shared between interfaces"
+            ),
             font=("Arial", 10),
             fg="#6b7280",
             bg="#0f0f23",
@@ -147,11 +161,17 @@ class DARTLauncher:
         )
         footer_label.pack()
 
-    def create_option_card(self, parent, title, description, features, command, row, column):
+    def create_option_card(
+        self, parent, title, description, features, command, row, column
+    ):
         """Create an option card for interface selection."""
         # Card frame
-        card_frame = tk.Frame(parent, bg="#1e1e3f", relief=tk.RAISED, borderwidth=2)
-        card_frame.grid(row=row, column=column, padx=20, pady=20, sticky="nsew")
+        card_frame = tk.Frame(
+            parent, bg="#1e1e3f", relief=tk.RAISED, borderwidth=2
+        )
+        card_frame.grid(
+            row=row, column=column, padx=20, pady=20, sticky="nsew"
+        )
 
         # Card content
         content_frame = tk.Frame(card_frame, bg="#1e1e3f")
@@ -159,7 +179,11 @@ class DARTLauncher:
 
         # Title
         title_label = tk.Label(
-            content_frame, text=title, font=("Arial", 18, "bold"), fg="#ffffff", bg="#1e1e3f",
+            content_frame,
+            text=title,
+            font=("Arial", 18, "bold"),
+            fg="#ffffff",
+            bg="#1e1e3f",
         )
         title_label.pack(anchor="w", pady=(0, 10))
 
@@ -203,14 +227,14 @@ class DARTLauncher:
         launch_button.pack(side=tk.BOTTOM, fill=tk.X)
 
         # Hover effects
-        def on_enter(e):
+        def on_enter(_event):
             card_frame.configure(bg="#2a2a5a")
             content_frame.configure(bg="#2a2a5a")
             title_label.configure(bg="#2a2a5a")
             desc_label.configure(bg="#2a2a5a")
             features_label.configure(bg="#2a2a5a")
 
-        def on_leave(e):
+        def on_leave(_event):
             card_frame.configure(bg="#1e1e3f")
             content_frame.configure(bg="#1e1e3f")
             title_label.configure(bg="#1e1e3f")
@@ -228,7 +252,9 @@ class DARTLauncher:
             self.log_message("🚀 Launching Modern Web Dashboard...", "web")
 
             # Show loading message
-            loading_window = self.show_loading_window("Starting Modern Web Dashboard...")
+            loading_window = self.show_loading_window(
+                "Starting Modern Web Dashboard..."
+            )
 
             def start_streamlit():
                 try:
@@ -254,79 +280,111 @@ class DARTLauncher:
                         text=True,
                     )
 
-                    self.log_message("⏳ Waiting for Streamlit to initialize...", "web")
+                    self.log_message(
+                        "⏳ Waiting for Streamlit to initialize...", "web"
+                    )
 
                     # Monitor Streamlit output
                     def monitor_streamlit():
-                        while self.streamlit_process and self.streamlit_process.poll() is None:
+                        while (
+                            self.streamlit_process
+                            and self.streamlit_process.poll() is None
+                        ):
                             try:
-                                output = self.streamlit_process.stdout.readline()
+                                output = (
+                                    self.streamlit_process.stdout.readline()
+                                )
                                 if output:
-                                    self.log_message(f"📡 {output.strip()}", "web")
-                            except Exception:
+                                    self.log_message(
+                                        f"📡 {output.strip()}", "web"
+                                    )
+                            except Exception:  # pylint: disable=broad-except
                                 break
 
                     # Start monitoring in background
-                    threading.Thread(target=monitor_streamlit, daemon=True).start()
+                    threading.Thread(
+                        target=monitor_streamlit, daemon=True
+                    ).start()
 
                     # Wait a bit for Streamlit to start
                     time.sleep(4)
 
-                    self.log_message("🌐 Opening browser to http://localhost:8501", "web")
+                    self.log_message(
+                        "🌐 Opening browser to http://localhost:8501", "web"
+                    )
                     # Open browser
                     webbrowser.open("http://localhost:8501")
 
                     # Close loading window
                     self.root.after(0, loading_window.destroy)
 
-                    self.log_message("✅ Web Dashboard launched successfully!", "web")
+                    self.log_message(
+                        "✅ Web Dashboard launched successfully!", "web"
+                    )
 
                     # Show success message
                     self.root.after(
                         0,
                         lambda: messagebox.showinfo(
                             "Dashboard Launched",
-                            "Modern Web Dashboard is now running!\n\nURL: http://localhost:8501\n\nThe dashboard will open in your default browser.",
+                            "Modern Web Dashboard is now running!\n\n"
+                            "URL: http://localhost:8501\n\n"
+                            "The dashboard will open in your default browser.",
                         ),
                     )
 
-                except Exception as e:
+                except Exception as e:  # pylint: disable=broad-except
                     error_message = str(e)
                     self.root.after(0, loading_window.destroy)
                     self.root.after(
                         0,
                         lambda msg=error_message: messagebox.showerror(
-                            "Launch Error", f"Failed to launch web dashboard:\n{msg}",
+                            "Launch Error",
+                            f"Failed to launch web dashboard:\n{msg}",
                         ),
                     )
 
             # Start in separate thread
             threading.Thread(target=start_streamlit, daemon=True).start()
 
-        except Exception as e:
-            messagebox.showerror("Launch Error", f"Failed to launch web dashboard: {str(e)}")
+        except Exception as e:  # pylint: disable=broad-except
+            messagebox.showerror(
+                "Launch Error", f"Failed to launch web dashboard: {str(e)}"
+            )
 
     def launch_desktop_app(self):
         """Launch the classic desktop interface."""
         try:
-            self.log_message("🚀 Launching Classic Desktop Interface...", "desktop")
+            self.log_message(
+                "🚀 Launching Classic Desktop Interface...", "desktop"
+            )
 
             # Import the desktop app first to check for issues
-            from ui.app import DerivApp
+            from ui.app import (
+                DerivApp,
+            )  # pylint: disable=import-outside-toplevel
 
-            self.log_message("✅ Desktop module imported successfully", "desktop")
+            self.log_message(
+                "✅ Desktop module imported successfully", "desktop"
+            )
 
             # Show loading message briefly
-            loading_window = self.show_loading_window("Starting Classic Desktop Interface...")
+            loading_window = self.show_loading_window(
+                "Starting Classic Desktop Interface..."
+            )
 
             def start_desktop():
                 try:
-                    self.log_message("🖥️ Initializing desktop interface...", "desktop")
+                    self.log_message(
+                        "🖥️ Initializing desktop interface...", "desktop"
+                    )
 
                     # Close loading window first
                     loading_window.destroy()
 
-                    self.log_message("🎯 Starting DART desktop application...", "desktop")
+                    self.log_message(
+                        "🎯 Starting DART desktop application...", "desktop"
+                    )
 
                     # Close launcher (this will destroy log widgets)
                     self.root.destroy()
@@ -340,21 +398,22 @@ class DARTLauncher:
 
                     desktop_root.mainloop()
 
-                except Exception as e:
+                except Exception as e:  # pylint: disable=broad-except
                     error_msg = f"Failed to launch desktop interface: {str(e)}"
                     # Try to log, but if it fails, just print
                     try:
                         self.log_message(f"❌ {error_msg}", "desktop")
-                    except Exception:
+                    except Exception:  # pylint: disable=broad-except
                         print(f"❌ {error_msg}")
                     messagebox.showerror(
-                        "Desktop Launch Error", f"{error_msg}\n\nTry restarting the launcher.",
+                        "Desktop Launch Error",
+                        f"{error_msg}\n\nTry restarting the launcher.",
                     )
 
             # Schedule the desktop app start after a brief delay
             self.root.after(1000, start_desktop)
 
-        except Exception as e:
+        except Exception as e:  # pylint: disable=broad-except
             error_msg = f"Failed to import desktop interface: {str(e)}"
             self.log_message(f"❌ {error_msg}", "desktop")
             messagebox.showerror("Import Error", error_msg)
@@ -376,7 +435,11 @@ class DARTLauncher:
         loading_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=20)
 
         loading_label = tk.Label(
-            loading_frame, text=message, font=("Arial", 12), fg="#ffffff", bg="#0f0f23",
+            loading_frame,
+            text=message,
+            font=("Arial", 12),
+            fg="#ffffff",
+            bg="#0f0f23",
         )
         loading_label.pack(pady=(20, 10))
 
@@ -393,7 +456,7 @@ class DARTLauncher:
         if self.streamlit_process:
             try:
                 self.streamlit_process.terminate()
-            except Exception:
+            except Exception:  # pylint: disable=broad-except
                 pass
 
         self.root.destroy()
@@ -559,11 +622,20 @@ class DARTLauncher:
     def clear_logs(self):
         """Clear all log contents."""
         try:
-            if hasattr(self, "web_logs_text") and self.web_logs_text.winfo_exists():
+            if (
+                hasattr(self, "web_logs_text")
+                and self.web_logs_text.winfo_exists()
+            ):
                 self.web_logs_text.delete(1.0, tk.END)
-            if hasattr(self, "desktop_logs_text") and self.desktop_logs_text.winfo_exists():
+            if (
+                hasattr(self, "desktop_logs_text")
+                and self.desktop_logs_text.winfo_exists()
+            ):
                 self.desktop_logs_text.delete(1.0, tk.END)
-            if hasattr(self, "system_logs_text") and self.system_logs_text.winfo_exists():
+            if (
+                hasattr(self, "system_logs_text")
+                and self.system_logs_text.winfo_exists()
+            ):
                 self.system_logs_text.delete(1.0, tk.END)
             self.log_message("Logs cleared", "system")
         except (tk.TclError, AttributeError):
@@ -575,23 +647,32 @@ class DARTLauncher:
             timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
             log_file = f"dart_logs_{timestamp}.txt"
 
-            with open(log_file, "w") as f:
+            with open(log_file, "w", encoding="utf-8") as f:
                 f.write("=== DART System Logs ===\n")
-                if hasattr(self, "system_logs_text") and self.system_logs_text.winfo_exists():
+                if (
+                    hasattr(self, "system_logs_text")
+                    and self.system_logs_text.winfo_exists()
+                ):
                     f.write(self.system_logs_text.get(1.0, tk.END))
                 f.write("\n=== Web Dashboard Logs ===\n")
-                if hasattr(self, "web_logs_text") and self.web_logs_text.winfo_exists():
+                if (
+                    hasattr(self, "web_logs_text")
+                    and self.web_logs_text.winfo_exists()
+                ):
                     f.write(self.web_logs_text.get(1.0, tk.END))
                 f.write("\n=== Desktop Interface Logs ===\n")
-                if hasattr(self, "desktop_logs_text") and self.desktop_logs_text.winfo_exists():
+                if (
+                    hasattr(self, "desktop_logs_text")
+                    and self.desktop_logs_text.winfo_exists()
+                ):
                     f.write(self.desktop_logs_text.get(1.0, tk.END))
 
             self.log_message(f"Logs saved to {log_file}", "system")
             messagebox.showinfo("Logs Saved", f"Logs saved to {log_file}")
-        except Exception as e:
+        except Exception as e:  # pylint: disable=broad-except
             try:
                 self.log_message(f"Error saving logs: {e}", "system")
-            except Exception:
+            except Exception:  # pylint: disable=broad-except
                 print(f"Error saving logs: {e}")
             messagebox.showerror("Error", f"Failed to save logs: {e}")
 
