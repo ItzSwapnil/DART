@@ -75,31 +75,41 @@ This reads the configuration defined in [pyproject.toml](file:///c:/Users/Swapni
 
 ---
 
-## 3. Obtaining Deriv Developer Credentials (OAuth 2.0 PKCE)
+## 3. Obtaining Deriv API Credentials
 
-DART v3.1 uses **OAuth 2.0 Authorization Code Flow with PKCE (Proof Key for Code Exchange)** for security, deprecating static API tokens.
+DART v3.1 supports both **Personal Access Tokens (PAT)** (the easiest method, which does **not** require registering an app or applying for Partners Hub access) and **OAuth 2.0 PKCE** flow.
 
-### Step 3.1: Register a Deriv Application
-1. Go to the [Deriv Developer Portal Portal](https://developers.deriv.com/) and log in with your Deriv account.
-2. Go to **Manage App / Register App** (or click [here](https://developers.deriv.com/api-registration/)).
-3. Fill in the application details:
+### Option A: Personal Access Token (PAT) — Recommended
+This is the simplest way to configure DART. You use your standard Deriv account credentials to generate an API token:
+
+1. Log in to your standard Deriv account at [app.deriv.com](https://app.deriv.com/) or [deriv.app](https://deriv.app/).
+2. Click on your profile/avatar icon in the top right corner and go to **Account Settings**.
+3. Under the **API Token** section on the left sidebar:
+   - Tick the following scopes: **Read**, **Trade**, and **Trading Information**.
+   - Choose a name for the token (e.g., `DART`).
+   - Click **Create**.
+4. Copy the generated token string.
+5. Paste this token directly into your `[env](file:///c:/Users/Swapnil/Projects/DART/.env)` file as `API__DERIV_ACCESS_TOKEN`.
+6. Leave `API__DERIV_ACCOUNT_ID` blank; DART will automatically fetch and use your default account ID associated with the token.
+
+> [!NOTE]
+> Partners Hub access is **not** necessary for generating Personal Access Tokens or using the DART platform.
+
+---
+
+### Option B: OAuth 2.0 PKCE App Registration (Optional)
+If you wish to register a formal application:
+1. Go to the [Deriv Developer Portal Portal](https://developers.deriv.com/) (if the portal directs you to Partners Hub, use Option A instead).
+2. Go to **Register App**.
+3. Fill in the details:
    - **Application Name**: `DART Algorithmic Trader`
-   - **Redirect URL**: `http://localhost:8080/callback` (This redirect URL matches the default redirect URI used by [DerivClient](file:///c:/Users/Swapnil/Projects/DART/api/deriv_client.py#L182))
-   - **Scopes**: Tick **Read**, **Trade**, and **Trading Information** (you can optionally select *Payments* and *Admin* if you require full dashboard capabilities).
-4. Click **Register**.
-5. Copy your generated **App ID** and **OAuth Client ID** (which is usually the same as App ID or a specific Client ID string).
-
-### Step 3.2: Interactive Login and Obtaining Access Token
-To perform live trading, DART requires an active OAuth `access_token` and `account_id` (a currency account e.g. `CR12345` or virtual account `VR12345`).
-
-DART contains an interactive script that automatically performs the PKCE authentication flow, spins up a local server, handles the callback, and prints out your credentials:
-1. Run the interactive login sequence inside WSL:
+   - **Redirect URL**: `http://localhost:8080/callback` (Matches redirect URI in [DerivClient](file:///c:/Users/Swapnil/Projects/DART/api/deriv_client.py#L182))
+   - **Scopes**: Tick **Read**, **Trade**, and **Trading Information**.
+4. Copy your generated **App ID** and **OAuth Client ID**.
+5. Run the interactive login helper to authorize DART and get the access token:
    ```bash
    python -c "import asyncio; from api.deriv_client import DerivOAuth; auth = DerivOAuth(client_id='YOUR_APP_ID'); code = auth.login_interactive(); print('Auth Code:', code)"
    ```
-2. Your web browser will open a Deriv login page. Authenticate and authorize the application.
-3. Upon success, the browser redirects back to `http://localhost:8080/callback`. The background HTTP server captures the code and terminates.
-4. You will get the access token and account ID. Save these for the `.env` file.
 
 ---
 
@@ -126,18 +136,16 @@ To power the LLM Market Analyzer, you must run an OpenAI-compatible local infere
 
 The project utilizes Pydantic v2 settings (defined in [DARTSettings](file:///c:/Users/Swapnil/Projects/DART/config/dart_config.py#L103)) to load variables from a `.env` file located in the root directory.
 
-Create a `.env` file in `/mnt/c/Users/Swapnil/Projects/DART/.env` with the following contents:
+We have created a pre-configured `[env](file:///c:/Users/Swapnil/Projects/DART/.env)` file for you in the root folder. You simply need to open it and paste your API token.
 
 ```env
 # DART App General Settings
 DEBUG_MODE=False
 
-# API Credentials (OAuth 2.0 PKCE)
+# API Credentials (Personal Access Token - PAT)
+API__DERIV_ACCESS_TOKEN=your_deriv_api_token_here
+API__DERIV_ACCOUNT_ID=
 API__DERIV_APP_ID=72212
-API__DERIV_OAUTH_CLIENT_ID=your_deriv_oauth_client_id
-API__DERIV_OAUTH_REDIRECT_URI=http://localhost:8080/callback
-API__DERIV_ACCESS_TOKEN=your_oauth_access_token
-API__DERIV_ACCOUNT_ID=your_deriv_account_id
 
 # AI & LLM Engine Settings
 AI__USE_DEEP_RL=True
