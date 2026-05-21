@@ -11,11 +11,17 @@ class TestCoreImports:
 
         assert DerivClient is not None
 
-    def test_import_trading_ai(self):
-        """Test TradingAI can be imported."""
-        from ml.trading_ai import TradingAI
+    def test_import_deriv_oauth(self):
+        """Test DerivOAuth can be imported."""
+        from api.deriv_client import DerivOAuth
 
-        assert TradingAI is not None
+        assert DerivOAuth is not None
+
+    def test_import_trading_ai(self):
+        """Test TradingAIv3 can be imported."""
+        from ml.trading_ai_v3 import TradingAIv3
+
+        assert TradingAIv3 is not None
 
     def test_import_auto_trader(self):
         """Test AutoTrader can be imported."""
@@ -23,12 +29,22 @@ class TestCoreImports:
 
         assert AutoTrader is not None
 
-    def test_import_settings(self):
-        """Test settings can be imported."""
-        from config.settings import DERIV_APP_ID, TRADE_AMOUNT
+    def test_import_dart_config(self):
+        """Test dart_config can be imported."""
+        from config.dart_config import get_config, load_config
 
-        assert DERIV_APP_ID is not None
-        assert TRADE_AMOUNT is not None
+        assert get_config is not None
+        assert load_config is not None
+
+    def test_config_has_oauth_fields(self):
+        """Test config has OAuth 2.0 fields (not legacy api_token)."""
+        from config.dart_config import get_config
+
+        config = get_config()
+        assert hasattr(config.api, "deriv_access_token")
+        assert hasattr(config.api, "deriv_account_id")
+        assert hasattr(config.api, "deriv_oauth_client_id")
+        assert not hasattr(config.api, "deriv_api_token")
 
 
 class TestMLImports:

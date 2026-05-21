@@ -12,7 +12,6 @@ from typing import Dict
 import numpy as np
 import pandas as pd
 import requests
-from textblob import TextBlob
 
 warnings.filterwarnings("ignore")
 
@@ -318,10 +317,44 @@ class SentimentAnalyzer:
             return []
 
     def _analyze_text_sentiment(self, text):
-        """Analyze sentiment of text using TextBlob."""
+        """Analyze sentiment of text using a lightweight keyword heuristic."""
         try:
-            blob = TextBlob(text)
-            return blob.sentiment.polarity
+            normalized_text = (text or "").lower()
+            positive_terms = (
+                "gain",
+                "bull",
+                "bullish",
+                "strong",
+                "beat",
+                "growth",
+                "up",
+                "optimistic",
+                "rally",
+                "positive",
+                "surge",
+            )
+            negative_terms = (
+                "loss",
+                "bear",
+                "bearish",
+                "weak",
+                "miss",
+                "decline",
+                "down",
+                "pessimistic",
+                "selloff",
+                "negative",
+                "drop",
+            )
+
+            positive_score = sum(term in normalized_text for term in positive_terms)
+            negative_score = sum(term in normalized_text for term in negative_terms)
+            total = positive_score + negative_score
+
+            if total == 0:
+                return 0.0
+
+            return (positive_score - negative_score) / total
         except Exception:
             return 0.0
 

@@ -1,177 +1,372 @@
+"""
+DART v3.1 — Modern Deriv API Client
+OAuth 2.0 PKCE authentication + OTP-based WebSocket trading.
+
+Authentication flow:
+  1. OAuth 2.0 Authorization Code + PKCE → access_token
+  2. POST /accounts/{id}/otp → OTP WebSocket URL
+  3. Connect to OTP WebSocket URL for authenticated trading
+  4. Public data uses wss://api.derivws.com/trading/v1/options/ws/public (no auth)
+"""
+
+import asyncio
+import hashlib
+import http.server
+import json
 import logging
-from datetime import UTC, datetime
+import os
+import re
+import secrets
+import threading
+import urllib.parse
+import webbrowser
+from base64 import urlsafe_b64encode
+from datetime import datetime, timezone
+from typing import Any, Optional
 
-from deriv_api import DerivAPI
+import httpx
+import websockets
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-)
 logger = logging.getLogger("deriv_client")
 
 
-class DerivClient:
-    """Client for interacting with the Deriv API."""
+# ---------------------------------------------------------------------------
+# OAuth 2.0 PKCE Helper
+# ---------------------------------------------------------------------------
 
-    def __init__(self, app_id="70789", api_token=None):
-        self.app_id = app_id
-        self.api_token = api_token
-        self.active_trades = {}  # Dictionary to track active trades
-        self.trade_history = []  # List to track trade history
-        self.consecutive_losses = 0  # Counter for consecutive losses
-        self.is_connected = False
-        self.account_info = None
+class DerivOAuth:
+    """OAuth 2.0 Authorization Code flow with PKCE for Deriv."""
 
-    async def _get_api_instance(self):
-        """Get an authenticated API instance."""
-        if self.api_token:
-            return DerivAPI(app_id=self.app_id, token=self.api_token)
-        else:
-            return DerivAPI(app_id=self.app_id)
+    AUTH_URL = "https://auth.deriv.com/oauth2/auth"
+    TOKEN_URL = "https://auth.deriv.com/oauth2/token"
 
-    async def get_active_symbols(self):
-        """Fetch and return active market symbols."""
-        try:
-            api = await self._get_api_instance()
+    def __init__(self, client_id: str, redirect_uri: str = "http://localhost:8080/callback"):
+        self.client_id = client_id
+        self.redirect_uri = redirect_uri
+        self._code_verifier: Optional[str] = None
+        self._state: Optional[str] = None
 
-            # Explicitly authorize with the API token before fetching active symbols
-            if self.api_token:
-                auth_response = await api.authorize({"authorize": self.api_token})
+    # -- PKCE helpers -------------------------------------------------------
 
-                if "error" in auth_response:
-                    error_msg = f"Authorization failed: {auth_response['error']['message']}"
-                    logger.error(error_msg)
-                    return {}
+    @staticmethod
+    def _generate_code_verifier(length: int = 64) -> str:
+        """Generate a cryptographically random code_verifier (43-128 chars)."""
+        charset = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~"
+        return "".join(secrets.choice(charset) for _ in range(length))
 
-                # Update account info after successful authorization
-                self.account_info = auth_response.get("authorize", {})
+    @staticmethod
+    def _derive_code_challenge(verifier: str) -> str:
+        """Derive code_challenge = BASE64URL(SHA256(code_verifier))."""
+        digest = hashlib.sha256(verifier.encode("ascii")).digest()
+        return urlsafe_b64encode(digest).rstrip(b"=").decode("ascii")
 
-            response = await api.active_symbols(
-                {"active_symbols": "brief", "product_type": "basic"},
-            )
-            active_symbols = response.get("active_symbols", [])
-            symbols_dict = {}
-            for symbol in active_symbols:
-                # Check if the market is closed
-                is_closed = not symbol.get("exchange_is_open", True)
-                market_name = f"{symbol['market_display_name']} - {symbol['display_name']}"
-
-                # Add closed indicator to market name if closed
-                if is_closed:
-                    market_name = f"{market_name} [CLOSED]"
-
-                symbols_dict[market_name] = symbol["symbol"]
-            return symbols_dict
-        except Exception as e:
-            print(f"Error fetching active symbols: {e}")
-            return {}
-
-    async def get_candles(self, symbol, granularity, count=50):
-        """Retrieve candle data for a specific symbol and granularity."""
-        try:
-            api = await self._get_api_instance()
-
-            # Explicitly authorize with the API token before fetching candles
-            if self.api_token:
-                auth_response = await api.authorize({"authorize": self.api_token})
-
-                if "error" in auth_response:
-                    error_msg = f"Authorization failed: {auth_response['error']['message']}"
-                    logger.error(error_msg)
-                    return []
-
-                # Update account info after successful authorization
-                self.account_info = auth_response.get("authorize", {})
-
-            response = await api.ticks_history(
-                {
-                    "ticks_history": symbol,
-                    "count": count,
-                    "end": "latest",
-                    "style": "candles",
-                    "granularity": granularity,
-                },
-            )
-            return response.get("candles", [])
-        except Exception as e:
-            print(f"Error fetching candles: {e}")
-            return []
-
-    async def get_historical_data(self, symbol, granularity, days=7):
-        """Retrieve historical candle data for a specific symbol and granularity for the specified number of days."""
-        try:
-            api = await self._get_api_instance()
-
-            # Explicitly authorize with the API token before fetching historical data
-            if self.api_token:
-                auth_response = await api.authorize({"authorize": self.api_token})
-
-                if "error" in auth_response:
-                    error_msg = f"Authorization failed: {auth_response['error']['message']}"
-                    logger.error(error_msg)
-                    return []
-
-                # Update account info after successful authorization
-                self.account_info = auth_response.get("authorize", {})
-
-            # Calculate count based on granularity and days
-            # granularity is in seconds, so calculate how many candles in the given days
-            seconds_per_day = 24 * 60 * 60
-            total_seconds = days * seconds_per_day
-            count = min(total_seconds // granularity, 5000)  # Cap at 5000 to avoid API limits
-
-            # Use the same format as get_candles but with more data
-            response = await api.ticks_history(
-                {
-                    "ticks_history": symbol,
-                    "count": int(count),
-                    "end": "latest",
-                    "style": "candles",
-                    "granularity": granularity,
-                },
-            )
-            return response.get("candles", [])
-        except Exception as e:
-            print(f"Error fetching historical data: {e}")
-            return []
-
-    async def get_contract_proposal(
-        self, symbol, contract_type, amount, duration, duration_unit="s",
-    ):
-        """
-        Get a contract proposal to check if the trade is valid and get max stake limits.
-
-        Args:
-            symbol: Market symbol
-            contract_type: Type of contract (CALL/PUT)
-            amount: Trade amount
-            duration: Contract duration
-            duration_unit: Duration unit (s/m/h/d)
+    def generate_pkce(self) -> tuple[str, str, str]:
+        """Generate PKCE parameters and random state.
 
         Returns:
-            Proposal information including max stake limits
+            (code_verifier, code_challenge, state)
         """
-        if not self.api_token:
-            error_msg = "API token is required for trading operations"
-            print(error_msg)
-            return {"error": {"message": error_msg}}
+        self._code_verifier = self._generate_code_verifier()
+        challenge = self._derive_code_challenge(self._code_verifier)
+        self._state = secrets.token_hex(16)
+        return self._code_verifier, challenge, self._state
+
+    # -- Authorization URL --------------------------------------------------
+
+    def get_authorization_url(self, scope: str = "trade") -> str:
+        """Build the Deriv OAuth authorization URL.
+
+        Call ``generate_pkce()`` first to populate verifier/state.
+        """
+        if self._code_verifier is None or self._state is None:
+            self.generate_pkce()
+
+        challenge = self._derive_code_challenge(self._code_verifier)
+        params = {
+            "response_type": "code",
+            "client_id": self.client_id,
+            "redirect_uri": self.redirect_uri,
+            "scope": scope,
+            "state": self._state,
+            "code_challenge": challenge,
+            "code_challenge_method": "S256",
+        }
+        return f"{self.AUTH_URL}?{urllib.parse.urlencode(params)}"
+
+    # -- Token exchange -----------------------------------------------------
+
+    async def exchange_code_for_token(self, code: str) -> dict[str, Any]:
+        """Exchange authorization code for access_token.
+
+        Args:
+            code: Authorization code received from Deriv callback.
+
+        Returns:
+            Token response dict: {"access_token": "...", "expires_in": ..., "token_type": "Bearer"}
+        """
+        if self._code_verifier is None:
+            raise RuntimeError("PKCE code_verifier missing — call generate_pkce() first")
+
+        payload = {
+            "grant_type": "authorization_code",
+            "client_id": self.client_id,
+            "code": code,
+            "code_verifier": self._code_verifier,
+            "redirect_uri": self.redirect_uri,
+        }
+        async with httpx.AsyncClient(timeout=20) as client:
+            resp = await client.post(
+                self.TOKEN_URL,
+                data=payload,
+                headers={"Content-Type": "application/x-www-form-urlencoded"},
+            )
+            resp.raise_for_status()
+            return resp.json()
+
+    # -- Local callback server (desktop flow) -------------------------------
+
+    def login_interactive(self, scope: str = "trade", timeout: int = 120) -> Optional[str]:
+        """Open browser for OAuth login and capture the callback code.
+
+        Spins up a tiny local HTTP server, opens the authorization URL in the
+        default browser, and waits for the redirect with the auth code.
+
+        Returns:
+            The authorization code, or None on timeout/failure.
+        """
+        self.generate_pkce()
+        auth_url = self.get_authorization_url(scope=scope)
+
+        captured: dict[str, Optional[str]] = {"code": None}
+        parsed_redirect = urllib.parse.urlparse(self.redirect_uri)
+        port = parsed_redirect.port or 8080
+
+        class _Handler(http.server.BaseHTTPRequestHandler):
+            def do_GET(self_inner):
+                qs = urllib.parse.parse_qs(urllib.parse.urlparse(self_inner.path).query)
+                captured["code"] = qs.get("code", [None])[0]
+                self_inner.send_response(200)
+                self_inner.send_header("Content-Type", "text/html")
+                self_inner.end_headers()
+                self_inner.wfile.write(
+                    b"<html><body><h2>Authentication successful!</h2>"
+                    b"<p>You can close this tab and return to DART.</p></body></html>"
+                )
+
+            def log_message(self_inner, *args):  # noqa: D401 — suppress noisy logs
+                pass
+
+        server = http.server.HTTPServer(("127.0.0.1", port), _Handler)
+        server.timeout = timeout
+
+        logger.info("Opening browser for Deriv OAuth login...")
+        webbrowser.open(auth_url)
+        server.handle_request()
+        server.server_close()
+
+        return captured["code"]
+
+    @property
+    def code_verifier(self) -> Optional[str]:
+        return self._code_verifier
+
+    @property
+    def state(self) -> Optional[str]:
+        return self._state
+
+
+# ---------------------------------------------------------------------------
+# Deriv Trading Client
+# ---------------------------------------------------------------------------
+
+class DerivClient:
+    """Modern Deriv API client — OAuth 2.0 + OTP WebSocket.
+
+    Authentication hierarchy:
+      1. ``access_token`` + ``account_id`` → REST OTP → authenticated WebSocket
+      2. Public WebSocket (no auth) for market data only
+    """
+
+    BASE_REST = "https://api.derivws.com"
+    PUBLIC_WS = "wss://api.derivws.com/trading/v1/options/ws/public"
+    ACCOUNTS_URL = f"{BASE_REST}/trading/v1/options/accounts"
+    OTP_URL = f"{BASE_REST}/trading/v1/options/accounts/{{account_id}}/otp"
+    HEALTH_URL = f"{BASE_REST}/v1/health"
+
+    def __init__(
+        self,
+        app_id: str = "72212",
+        access_token: Optional[str] = None,
+        account_id: Optional[str] = None,
+        http_timeout: int = 20,
+    ):
+        self.app_id = str(app_id)
+        self.access_token = access_token
+        self.account_id = account_id
+        self.http_timeout = http_timeout
+
+        self.active_trades: dict[str, dict[str, Any]] = {}
+        self.trade_history: list[dict[str, Any]] = []
+        self.consecutive_losses = 0
+        self.is_connected = False
+        self.account_info: Optional[dict[str, Any]] = None
+
+    # -- REST helpers -------------------------------------------------------
+
+    def _auth_headers(self) -> dict[str, str]:
+        """Standard headers for authenticated REST calls."""
+        headers = {"Deriv-App-ID": self.app_id}
+        if self.access_token:
+            headers["Authorization"] = f"Bearer {self.access_token}"
+        return headers
+
+    # -- WebSocket helpers --------------------------------------------------
+
+    async def _send_and_receive(
+        self,
+        ws,
+        message: dict[str, Any],
+        *,
+        match_key: Optional[str] = None,
+        timeout: int = 12,
+    ) -> dict[str, Any]:
+        """Send one request and wait for a matching response."""
+        req_id = message.get("req_id")
+        await ws.send(json.dumps(message))
+
+        loop = asyncio.get_running_loop()
+        end_time = loop.time() + timeout
+
+        while True:
+            if loop.time() > end_time:
+                raise asyncio.TimeoutError("Timed out waiting for Deriv WebSocket response")
+
+            raw = await ws.recv()
+            try:
+                data = json.loads(raw)
+            except json.JSONDecodeError:
+                continue
+
+            if "error" in data:
+                return data
+            if match_key and match_key in data:
+                return data
+            if req_id is not None and data.get("req_id") == req_id:
+                return data
+            if match_key is None:
+                return data
+
+    # -- OTP-based authenticated WebSocket ----------------------------------
+
+    async def _get_otp_ws_url(self) -> Optional[str]:
+        """Obtain an OTP-authenticated WebSocket URL via REST."""
+        if not (self.access_token and self.account_id):
+            return None
+
+        url = self.OTP_URL.format(account_id=self.account_id)
+        try:
+            async with httpx.AsyncClient(timeout=self.http_timeout) as client:
+                resp = await client.post(url, headers=self._auth_headers())
+                resp.raise_for_status()
+                return resp.json().get("data", {}).get("url")
+        except Exception as e:
+            logger.error("Failed to fetch OTP WebSocket URL: %s", e)
+            return None
+
+    async def _open_trading_ws(self):
+        """Open an authenticated trading WebSocket via OTP.
+
+        Falls back to the public endpoint (no trading) if OAuth is not configured.
+        """
+        otp_url = await self._get_otp_ws_url()
+        if otp_url:
+            try:
+                return await websockets.connect(otp_url)
+            except Exception as e:
+                logger.error("OTP WebSocket connection failed: %s", e)
+
+        # Fallback: public endpoint (market data only, no trading)
+        logger.warning("No OAuth credentials — connecting to public WebSocket (read-only)")
+        try:
+            return await websockets.connect(self.PUBLIC_WS)
+        except Exception as e:
+            logger.error("Public WebSocket connection failed: %s", e)
+            return None
+
+    # -- Market Data (public, no auth) --------------------------------------
+
+    async def get_active_symbols(self) -> dict[str, str]:
+        """Fetch active market symbols from public WebSocket."""
+        try:
+            async with websockets.connect(self.PUBLIC_WS) as ws:
+                resp = await self._send_and_receive(
+                    ws,
+                    {"active_symbols": "brief", "req_id": 1},
+                    match_key="active_symbols",
+                )
+                if "error" in resp:
+                    logger.error("active_symbols failed: %s", resp.get("error"))
+                    return {}
+
+                symbols = {}
+                for item in resp.get("active_symbols", []):
+                    market_name = f"{item.get('market_display_name')} - {item.get('display_name')}"
+                    if not item.get("exchange_is_open", True):
+                        market_name = f"{market_name} [CLOSED]"
+                    symbols[market_name] = item.get("symbol")
+                return symbols
+        except Exception as e:
+            logger.error("Error fetching active symbols: %s", e)
+            return {}
+
+    async def get_candles(self, symbol: str, granularity: int, count: int = 50) -> list[dict[str, Any]]:
+        """Retrieve candle history for a symbol (public endpoint)."""
+        try:
+            async with websockets.connect(self.PUBLIC_WS) as ws:
+                resp = await self._send_and_receive(
+                    ws,
+                    {
+                        "ticks_history": symbol,
+                        "count": count,
+                        "end": "latest",
+                        "style": "candles",
+                        "granularity": granularity,
+                        "req_id": 2,
+                    },
+                    timeout=15,
+                )
+                if "error" in resp:
+                    logger.error("ticks_history failed: %s", resp.get("error"))
+                    return []
+                return resp.get("candles") or resp.get("history") or []
+        except Exception as e:
+            logger.error("Error fetching candles: %s", e)
+            return []
+
+    async def get_historical_data(self, symbol: str, granularity: int, days: int = 7) -> list[dict[str, Any]]:
+        """Retrieve historical candle data with bounded count."""
+        seconds_per_day = 24 * 60 * 60
+        total_seconds = max(1, days) * seconds_per_day
+        count = int(min(total_seconds // max(1, granularity), 5000))
+        return await self.get_candles(symbol, granularity, count=count)
+
+    # -- Trading (authenticated via OTP) ------------------------------------
+
+    async def get_contract_proposal(
+        self,
+        symbol: str,
+        contract_type: str,
+        amount: float,
+        duration: int,
+        duration_unit: str = "s",
+    ) -> dict[str, Any]:
+        """Get a contract price proposal."""
+        ws = await self._open_trading_ws()
+        if not ws:
+            return {"error": {"message": "Unable to establish Deriv WebSocket"}}
 
         try:
-            api = await self._get_api_instance()
-
-            # Explicitly authorize with the API token
-            auth_response = await api.authorize({"authorize": self.api_token})
-
-            if "error" in auth_response:
-                error_msg = f"Authorization failed: {auth_response['error']['message']}"
-                logger.error(error_msg)
-                return {"error": {"message": error_msg}}
-
-            # Update account info after successful authorization
-            self.account_info = auth_response.get("authorize", {})
-
-            # Prepare the proposal request
-            proposal_params = {
+            req = {
                 "proposal": 1,
                 "amount": amount,
                 "basis": "stake",
@@ -179,273 +374,170 @@ class DerivClient:
                 "currency": "USD",
                 "duration": duration,
                 "duration_unit": duration_unit,
-                "symbol": symbol,
+                "underlying_symbol": symbol,
+                "req_id": 3,
             }
-
-            print(f"Requesting proposal with parameters: {proposal_params}")
-            response = await api.proposal(proposal_params)
-
-            if "error" in response:
-                error_msg = f"Error getting proposal: {response['error']['message']}"
-                print(error_msg)
-                return response
-
-            return response.get("proposal", {})
+            resp = await self._send_and_receive(ws, req, match_key="proposal")
+            if "error" in resp:
+                return resp
+            return resp.get("proposal", {})
         except Exception as e:
-            error_msg = f"Error getting contract proposal: {e}"
-            print(error_msg)
-            return {"error": {"message": error_msg}}
+            logger.error("Error getting contract proposal: %s", e)
+            return {"error": {"message": str(e)}}
+        finally:
+            await ws.close()
 
     async def buy_contract(
-        self, symbol, contract_type, amount, duration, duration_unit="s", price=None,
-    ):
-        """
-        Buy a contract with the specified parameters.
+        self,
+        symbol: str,
+        contract_type: str,
+        amount: float,
+        duration: int,
+        duration_unit: str = "s",
+        price: Optional[float] = None,
+    ) -> dict[str, Any]:
+        """Buy a contract: proposal → buy in one flow."""
+        proposal = await self.get_contract_proposal(
+            symbol=symbol,
+            contract_type=contract_type,
+            amount=amount,
+            duration=duration,
+            duration_unit=duration_unit,
+        )
+        if "error" in proposal:
+            return proposal
 
-        Args:
-            symbol: Market symbol
-            contract_type: Type of contract (CALL/PUT)
-            amount: Trade amount
-            duration: Contract duration
-            duration_unit: Duration unit (s/m/h/d)
-            price: Contract purchase price (optional)
+        proposal_id = proposal.get("id")
+        if not proposal_id:
+            return {"error": {"message": "Missing proposal id from Deriv response"}}
 
-        Returns:
-            API response
-        """
-        if not self.api_token:
-            error_msg = "API token is required for trading operations"
-            print(error_msg)
-            return {"error": {"message": error_msg}}
+        buy_price = float(price) if price is not None else float(proposal.get("ask_price", amount))
+
+        ws = await self._open_trading_ws()
+        if not ws:
+            return {"error": {"message": "Unable to establish Deriv WebSocket"}}
 
         try:
-            api = await self._get_api_instance()
-
-            # Explicitly authorize with the API token before making a trade
-            auth_response = await api.authorize({"authorize": self.api_token})
-
-            if "error" in auth_response:
-                error_msg = f"Authorization failed: {auth_response['error']['message']}"
-                logger.error(error_msg)
-                return {"error": {"message": error_msg}}
-
-            # Update account info after successful authorization
-            self.account_info = auth_response.get("authorize", {})
-
-            # Check if the stake amount exceeds the maximum purchase price
-            proposal = await self.get_contract_proposal(
-                symbol, contract_type, amount, duration, duration_unit,
-            )
-
-            if "error" in proposal:
-                # If there's an error with the proposal, check if it's related to the stake amount
-                error_msg = proposal.get("error", {}).get("message", "")
-                if "stake" in error_msg.lower() and "maximum" in error_msg.lower():
-                    # Try to extract the maximum stake from the error message
-                    import re
-
-                    max_stake_match = re.search(r"maximum.*?(\d+(\.\d+)?)", error_msg)
-                    if max_stake_match:
-                        max_stake = float(max_stake_match.group(1))
-                        print(f"Reducing stake amount from {amount} to {max_stake}")
-                        # Use the maximum stake amount instead
-                        amount = max_stake
-                    else:
-                        # If we can't extract the maximum, reduce by 25%
-                        reduced_amount = amount * 0.75
-                        print(f"Reducing stake amount from {amount} to {reduced_amount}")
-                        amount = reduced_amount
-                else:
-                    # For other errors, return the error response
-                    return proposal
-            else:
-                # Check if the proposal contains information about maximum stake
-                max_stake = proposal.get("max_stake")
-                if max_stake and float(amount) > float(max_stake):
-                    print(f"Stake amount {amount} exceeds maximum {max_stake}, reducing to maximum")
-                    amount = float(max_stake)
-
-            # If price is not provided, get the current market price
-            if price is None:
-                print(f"No price provided for {symbol}, attempting to get current market price")
-                # Get the latest tick to determine current price
-                # Note: We don't use the "subscribe" parameter here as it causes validation errors
-                tick_response = await api.ticks({"ticks": symbol})
-
-                if "error" in tick_response:
-                    error_msg = f"Error getting current price: {tick_response['error']['message']}"
-                    print(error_msg)
-                    return {"error": {"message": error_msg}}
-
-                print(f"Tick response: {tick_response}")
-                price = tick_response.get("tick", {}).get("quote")
-                print(f"Retrieved price: {price}")
-
-                if not price:
-                    error_msg = "Could not determine current market price"
-                    print(error_msg)
-                    return {"error": {"message": error_msg}}
-
-            # Ensure we have a valid price
-            if price is None:
-                error_msg = "Price is required for contract purchase"
-                print(error_msg)
-                return {"error": {"message": error_msg}}
-
-            # Convert price to string to ensure it's properly formatted for the API
-            price = str(price)
-
-            # Prepare the buy request
-            buy_params = {
-                "buy": 1,
-                "price": price,  # Include price at the top level
-                "parameters": {
-                    "amount": amount,
-                    "basis": "stake",
-                    "contract_type": contract_type,
-                    "currency": "USD",
-                    "duration": duration,
-                    "duration_unit": duration_unit,
-                    "symbol": symbol,
-                },
+            buy_req = {
+                "buy": proposal_id,
+                "price": buy_price,
+                "req_id": 4,
             }
+            resp = await self._send_and_receive(ws, buy_req, match_key="buy")
+            if "error" in resp:
+                return resp
 
-            print(f"Using price: {price} for contract purchase")
-
-            print(f"Sending buy request with parameters: {buy_params}")
-            response = await api.buy(buy_params)
-
-            if "error" in response:
-                error_msg = f"Error buying contract: {response['error']['message']}"
-                print(error_msg)
-                return response
-
-            # Store the trade in active trades
-            contract_id = response.get("buy", {}).get("contract_id")
-            if contract_id:
-                self.active_trades[contract_id] = {
+            buy_data = resp.get("buy", {})
+            contract_id = buy_data.get("contract_id")
+            if contract_id is not None:
+                self.active_trades[str(contract_id)] = {
                     "symbol": symbol,
                     "contract_type": contract_type,
                     "amount": amount,
                     "duration": duration,
                     "duration_unit": duration_unit,
-                    "buy_response": response,
+                    "buy_response": resp,
                     "status": "open",
-                    "start_time": datetime.now(tz=UTC),
+                    "start_time": datetime.now(timezone.utc),
                 }
 
-            return response
+            return resp
         except Exception as e:
-            error_msg = f"Error buying contract: {e}"
-            print(error_msg)
-            return {"error": {"message": error_msg}}
+            logger.error("Error buying contract: %s", e)
+            return {"error": {"message": str(e)}}
+        finally:
+            await ws.close()
 
-    async def check_trade_status(self, contract_id):
-        """Check the status of a specific trade."""
-        if not self.api_token or contract_id not in self.active_trades:
+    async def check_trade_status(self, contract_id: str) -> Optional[dict[str, Any]]:
+        """Check the status of an open contract."""
+        if str(contract_id) not in self.active_trades:
+            return None
+
+        ws = await self._open_trading_ws()
+        if not ws:
             return None
 
         try:
-            api = await self._get_api_instance()
-
-            # Explicitly authorize with the API token before checking trade status
-            auth_response = await api.authorize({"authorize": self.api_token})
-
-            if "error" in auth_response:
-                error_msg = f"Authorization failed: {auth_response['error']['message']}"
-                logger.error(error_msg)
+            resp = await self._send_and_receive(
+                ws,
+                {
+                    "proposal_open_contract": 1,
+                    "contract_id": int(contract_id),
+                    "req_id": 5,
+                },
+                match_key="proposal_open_contract",
+            )
+            if "error" in resp:
+                logger.error("proposal_open_contract failed: %s", resp.get("error"))
                 return None
 
-            # Update account info after successful authorization
-            self.account_info = auth_response.get("authorize", {})
+            info = resp.get("proposal_open_contract", {})
+            trade_key = str(contract_id)
+            self.active_trades[trade_key]["current_info"] = info
 
-            response = await api.proposal_open_contract({"contract_id": contract_id})
+            if info.get("status") in ["sold", "expired"]:
+                record = self.active_trades.pop(trade_key)
+                record["status"] = "closed"
+                record["end_time"] = datetime.now(timezone.utc)
 
-            if "error" in response:
-                print(f"Error checking trade status: {response['error']['message']}")
-                return None
+                buy_price = float(info.get("buy_price", 0) or 0)
+                sell_price = float(info.get("sell_price", 0) or 0)
+                profit = sell_price - buy_price
+                record["profit"] = profit
+                self.trade_history.append(record)
 
-            contract_info = response.get("proposal_open_contract", {})
+                if profit < 0:
+                    self.consecutive_losses += 1
+                else:
+                    self.consecutive_losses = 0
 
-            # Update trade information
-            if contract_id in self.active_trades:
-                self.active_trades[contract_id]["current_info"] = contract_info
-
-                # Check if the contract is finished
-                if contract_info.get("status") in ["sold", "expired"]:
-                    self.active_trades[contract_id]["status"] = "closed"
-                    self.active_trades[contract_id]["end_time"] = datetime.now(tz=UTC)
-
-                    # Calculate profit/loss
-                    buy_price = contract_info.get("buy_price", 0)
-                    sell_price = contract_info.get("sell_price", 0)
-                    profit = sell_price - buy_price
-
-                    self.active_trades[contract_id]["profit"] = profit
-
-                    # Add to trade history
-                    trade_record = self.active_trades[contract_id].copy()
-                    self.trade_history.append(trade_record)
-
-                    # Update consecutive losses counter
-                    if profit < 0:
-                        self.consecutive_losses += 1
-                    else:
-                        self.consecutive_losses = 0
-
-                    # Remove from active trades
-                    del self.active_trades[contract_id]
-
-            return contract_info
+            return info
         except Exception as e:
-            print(f"Error checking trade status: {e}")
+            logger.error("Error checking trade status: %s", e)
             return None
+        finally:
+            await ws.close()
 
-    async def check_all_trades(self):
-        """Check the status of all active trades."""
+    async def check_all_trades(self) -> dict[str, Optional[dict[str, Any]]]:
+        """Check all currently tracked active trades."""
         results = {}
-        for contract_id in list(self.active_trades.keys()):
-            results[contract_id] = await self.check_trade_status(contract_id)
+        for cid in list(self.active_trades.keys()):
+            results[cid] = await self.check_trade_status(cid)
         return results
 
-    async def check_connection(self):
-        """Check if the connection to the Deriv API is active."""
-        try:
-            api = await self._get_api_instance()
-            # Ping the API with a simple request
-            response = await api.ping()
-            self.is_connected = "ping" in response and response["ping"] == "pong"
-            return self.is_connected
-        except Exception as e:
-            logger.error(f"Connection check failed: {e}")
-            self.is_connected = False
-            return False
+    # -- Account management (REST) ------------------------------------------
 
-    async def get_account_info(self):
-        """Get account information including balance."""
-        if not self.api_token:
-            logger.warning("API token is required to get account information")
+    async def get_account_info(self) -> Optional[dict[str, Any]]:
+        """Get account info via REST (OAuth required)."""
+        if not self.access_token:
+            logger.warning("OAuth access_token required for account info")
             return None
 
         try:
-            api = await self._get_api_instance()
-            response = await api.authorize({"authorize": self.api_token})
-
-            if "error" in response:
-                logger.error(f"Error getting account info: {response['error']['message']}")
-                self.is_connected = False
-                return None
-
-            self.is_connected = True
-            self.account_info = response.get("authorize", {})
-            return self.account_info
+            async with httpx.AsyncClient(timeout=self.http_timeout) as client:
+                resp = await client.get(self.ACCOUNTS_URL, headers=self._auth_headers())
+                resp.raise_for_status()
+                data = resp.json().get("data", [])
+                if isinstance(data, list) and data:
+                    if self.account_id:
+                        matched = next(
+                            (x for x in data if x.get("account_id") == self.account_id),
+                            data[0],
+                        )
+                        self.account_info = matched
+                    else:
+                        self.account_info = data[0]
+                        self.account_id = self.account_info.get("account_id")
+                    self.is_connected = True
+                    return self.account_info
         except Exception as e:
-            logger.error(f"Error getting account info: {e}")
-            self.is_connected = False
-            return None
+            logger.error("REST account info failed: %s", e)
 
-    async def get_account_balance(self):
-        """Get the account balance."""
+        self.is_connected = False
+        return None
+
+    async def get_account_balance(self) -> Optional[dict[str, Any]]:
+        """Get account balance from cached or freshly loaded account info."""
         if self.account_info is None:
             await self.get_account_info()
 
@@ -457,119 +549,94 @@ class DerivClient:
 
         return None
 
-    async def get_available_durations(self, symbol, contract_type):
-        """
-        Get available durations for a specific symbol and contract type.
+    # -- Connection health --------------------------------------------------
 
-        Args:
-            symbol: Market symbol
-            contract_type: Type of contract (CALL/PUT)
+    async def check_connection(self) -> bool:
+        """Check connectivity via WebSocket ping."""
+        try:
+            async with websockets.connect(self.PUBLIC_WS) as ws:
+                resp = await self._send_and_receive(ws, {"ping": 1, "req_id": 6}, match_key="ping")
+                self.is_connected = resp.get("ping") == "pong"
+                return self.is_connected
+        except Exception as e:
+            logger.error("Connection check failed: %s", e)
+            self.is_connected = False
+            return False
 
-        Returns:
-            List of available durations in seconds, or None if error
-        """
+    async def check_health(self) -> bool:
+        """Check Deriv REST API health endpoint."""
+        try:
+            async with httpx.AsyncClient(timeout=self.http_timeout) as client:
+                resp = await client.get(self.HEALTH_URL)
+                return resp.status_code == 200
+        except Exception:
+            return False
+
+    # -- Contract metadata --------------------------------------------------
+
+    async def get_available_durations(self, symbol: str, contract_type: str) -> Optional[list[int]]:
+        """Get available standard durations for a symbol + contract type."""
         if not symbol:
             logger.error("Symbol is required to get available durations")
             return None
 
         try:
-            api = await self._get_api_instance()
-
-            # Explicitly authorize with the API token
-            if self.api_token:
-                auth_response = await api.authorize({"authorize": self.api_token})
-
-                if "error" in auth_response:
-                    error_msg = f"Authorization failed: {auth_response['error']['message']}"
-                    logger.error(error_msg)
+            async with websockets.connect(self.PUBLIC_WS) as ws:
+                resp = await self._send_and_receive(
+                    ws,
+                    {"contracts_for": symbol, "currency": "USD", "req_id": 8},
+                    match_key="contracts_for",
+                )
+                if "error" in resp:
+                    logger.error("Error getting contracts: %s", resp.get("error"))
                     return None
 
-                # Update account info after successful authorization
-                self.account_info = auth_response.get("authorize", {})
+                contracts = resp.get("contracts_for", {}).get("available", [])
+                available_durations: list[int] = []
 
-            # Query contracts_for endpoint to get available contracts
-            response = await api.contracts_for({"contracts_for": symbol, "currency": "USD"})
+                for contract in contracts:
+                    if contract.get("contract_type") != contract_type:
+                        continue
 
-            if "error" in response:
-                error_msg = f"Error getting contracts: {response['error']['message']}"
-                logger.error(error_msg)
-                return None
-
-            # Extract available durations for the specified contract type
-            available_durations = []
-            contracts = response.get("contracts_for", {}).get("available", [])
-
-            for contract in contracts:
-                if contract.get("contract_type") == contract_type:
-                    # Get min/max duration
                     min_duration = contract.get("min_contract_duration")
                     max_duration = contract.get("max_contract_duration")
 
-                    if min_duration and max_duration:
-                        # Convert duration strings to seconds
-                        min_seconds = self._duration_to_seconds(min_duration)
-                        max_seconds = self._duration_to_seconds(max_duration)
+                    if not (min_duration and max_duration):
+                        continue
 
-                        # Generate a list of standard durations within the range
-                        standard_durations = [
-                            30,
-                            60,
-                            120,
-                            180,
-                            300,
-                            600,
-                            900,
-                            1800,
-                            3600,
-                            7200,
-                            14400,
-                            28800,
-                            86400,
-                        ]
-                        for duration in standard_durations:
-                            if min_seconds <= duration <= max_seconds:
-                                available_durations.append(duration)
+                    min_seconds = self._duration_to_seconds(min_duration)
+                    max_seconds = self._duration_to_seconds(max_duration)
 
-            # Remove duplicates and sort
-            available_durations = sorted(list(set(available_durations)))
+                    standard = [30, 60, 120, 180, 300, 600, 900, 1800, 3600, 7200, 14400, 28800, 86400]
+                    for dur in standard:
+                        if min_seconds <= dur <= max_seconds:
+                            available_durations.append(dur)
 
-            if not available_durations:
-                logger.warning(
-                    f"No available durations found for {symbol} with contract type {contract_type}",
-                )
-
-            return available_durations
+                available_durations = sorted(set(available_durations))
+                if not available_durations:
+                    logger.warning(
+                        "No available durations found for %s with contract type %s",
+                        symbol,
+                        contract_type,
+                    )
+                return available_durations
 
         except Exception as e:
-            logger.error(f"Error getting available durations: {e}")
+            logger.error("Error getting available durations: %s", e)
             return None
 
-    def _duration_to_seconds(self, duration_str):
-        """
-        Convert duration string (e.g., "3m", "1h", "1d") to seconds.
-
-        Args:
-            duration_str: Duration string in format like "3m", "1h", "1d"
-
-        Returns:
-            Duration in seconds
-        """
+    @staticmethod
+    def _duration_to_seconds(duration_str: str) -> int:
+        """Convert a duration string like 5m, 2h, 1d, 10t to seconds."""
         if not duration_str:
             return 0
 
-        # Extract number and unit
-        unit = duration_str[-1].lower()
-        value = int(duration_str[:-1])
-
-        # Convert to seconds based on unit
-        if unit == "s":
-            return value
-        elif unit == "m":
-            return value * 60
-        elif unit == "h":
-            return value * 3600
-        elif unit == "d":
-            return value * 86400
-        else:
-            logger.warning(f"Unknown duration unit: {unit}")
+        match = re.match(r"^(\d+)([smhdtSMHDT])$", str(duration_str).strip())
+        if not match:
             return 0
+
+        value = int(match.group(1))
+        unit = match.group(2).lower()
+
+        multipliers = {"s": 1, "m": 60, "h": 3600, "d": 86400, "t": 1}
+        return value * multipliers.get(unit, 0)

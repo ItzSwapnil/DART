@@ -18,13 +18,23 @@ import streamlit as st
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from api.deriv_client import DerivClient
-from config.settings import *
+from config.dart_config import get_config
 from ml.auto_trader import AutoTrader
-from ml.trading_ai import TradingAI
+from ml.trading_ai_v3 import TradingAIv3
+
+config = get_config()
+CONFIDENCE_THRESHOLD = config.risk.confidence_threshold
+USE_DEEP_RL = config.ai.use_deep_rl
+USE_ENHANCED_FEATURES = config.ai.use_ensemble_ml
+MAX_DAILY_LOSS = config.risk.max_daily_loss
+TRADE_AMOUNT = config.trading.base_trade_amount
+DERIV_APP_ID = config.api.deriv_app_id
+DERIV_ACCESS_TOKEN = config.api.deriv_access_token
+DERIV_ACCOUNT_ID = config.api.deriv_account_id
 
 # Page configuration
 st.set_page_config(
-    page_title="DART v2.0 - Deep Adaptive Reinforcement Trader",
+    page_title="DART v3.0 - Deep Adaptive Reinforcement Trader",
     page_icon="🎯",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -171,11 +181,15 @@ class ModernDashboard:
     def initialize_components(self):
         """Initialize DART components."""
         try:
-            self.client = DerivClient(app_id=DERIV_APP_ID, api_token=DERIV_API_TOKEN)
-            self.trading_ai = TradingAI(
-                model_dir=os.path.join(os.path.dirname(os.path.dirname(__file__)), "models"),
-                use_deep_rl=USE_DEEP_RL,
-                use_enhanced_features=USE_ENHANCED_FEATURES,
+            self.client = DerivClient(
+                app_id=DERIV_APP_ID,
+                access_token=DERIV_ACCESS_TOKEN or None,
+                account_id=DERIV_ACCOUNT_ID or None,
+            )
+            self.trading_ai = TradingAIv3(
+                model_dir=config.model_dir,
+                use_llm=config.ai.use_llm_analysis,
+                require_real_llm=False,
             )
             self.auto_trader = AutoTrader(client=self.client, trading_ai=self.trading_ai)
         except Exception as e:
@@ -475,9 +489,9 @@ class ModernDashboard:
         st.markdown("</div>", unsafe_allow_html=True)
 
     def render_ai_insights(self):
-        """Render AI insights and signals with v2.0 integration."""
+        """Render AI insights and signals with v3.0 integration."""
         st.markdown('<div class="chart-container">', unsafe_allow_html=True)
-        st.markdown("### 🤖 AI Market Insights v2.0")
+        st.markdown("### 🤖 AI Market Insights v3.0")
 
         # Get real AI analysis if available
         sentiment_score = 0.75
@@ -532,7 +546,7 @@ class ModernDashboard:
 
         st.plotly_chart(fig, use_container_width=True)
 
-        # v2.0: Model confidence with uncertainty
+        # v3.0: Model confidence with uncertainty
         col1, col2 = st.columns(2)
         with col1:
             st.markdown(
@@ -1039,7 +1053,7 @@ class ModernDashboard:
         st.markdown(
             """
         <div style="text-align: center; color: #6b7280; font-size: 0.9rem;">
-            🎯 DART v2.0 - Deep Adaptive Reinforcement Trader<br>
+            🎯 DART v3.0 - Deep Adaptive Reinforcement Trader<br>
             Professional AI Trading Platform | Real-time Market Analysis
         </div>
         """,

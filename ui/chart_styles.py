@@ -1,6 +1,26 @@
 import mplfinance as mpf
 
-from config.settings import CHART_STYLES
+CHART_STYLES = {
+    "dark": {
+        "base_mpl_style": "dark_background",
+        "up_color": "green",
+        "down_color": "red",
+        "facecolor": "#121212",
+        "gridcolor": "#2A2A2A",
+        "gridstyle": "--",
+        "mavcolors": ["#1f77b4", "#ff7f0e", "#2ca02c"],
+    },
+    "light": {
+        "base_mpl_style": "default",
+        "up_color": "green",
+        "down_color": "red",
+        "facecolor": "white",
+        "gridcolor": "#E6E6E6",
+        "gridstyle": "-",
+        "mavcolors": ["#1f77b4", "#ff7f0e", "#2ca02c"],
+    },
+}
+
 
 
 def get_dark_style():

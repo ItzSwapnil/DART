@@ -85,7 +85,7 @@ class TradingEncoder(nn.Module):
         self.technical_conv = nn.Conv1d(technical_features, d_model // 2, kernel_size=3, padding=1)
         self.technical_lstm = nn.LSTM(
             d_model // 2,
-            d_model // 2,
+            d_model // 4,
             batch_first=True,
             bidirectional=True,
             num_layers=2,
@@ -585,6 +585,7 @@ class SoftActorCriticV2:
         """Select action using the current policy."""
         technical_data, price_data, volume_data, fundamental_data = self._process_state(state_data)
 
+        self.actor.eval()
         with torch.no_grad():
             action = self.actor.get_action(
                 technical_data, price_data, volume_data, fundamental_data, deterministic=eval_mode,
@@ -618,6 +619,13 @@ class SoftActorCriticV2:
             return None
 
         self.training_steps += 1
+
+        # Set training mode
+        self.actor.train()
+        self.critic.train()
+        self.regime_detector.train()
+        if self.use_curiosity:
+            self.curiosity.train()
 
         # Sample batch
         experiences, indices, weights = self.replay_buffer.sample(batch_size)
@@ -807,6 +815,8 @@ class SoftActorCriticV2:
         """Detect current market regime."""
         technical_data, price_data, volume_data, fundamental_data = self._process_state(state_data)
 
+        self.critic.eval()
+        self.regime_detector.eval()
         with torch.no_grad():
             state_encoding = self.critic.encoder(
                 technical_data, price_data, volume_data, fundamental_data,
@@ -837,6 +847,7 @@ class SoftActorCriticV2:
         """Get action uncertainty for exploration/exploitation trade-off."""
         technical_data, price_data, volume_data, fundamental_data = self._process_state(state_data)
 
+        self.actor.eval()
         with torch.no_grad():
             mean, log_std = self.actor(technical_data, price_data, volume_data, fundamental_data)
             std = log_std.exp()

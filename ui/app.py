@@ -13,18 +13,20 @@ from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from sklearn.linear_model import LinearRegression
 
 from api.deriv_client import DerivClient
-from config.settings import (
-    CONFIDENCE_THRESHOLD,
-    DEFAULT_CANDLE_COUNT,
-    DEFAULT_THEME,
-    DEFAULT_TIMEFRAME,
-    DERIV_API_TOKEN,
-    DERIV_APP_ID,
-    USE_DEEP_RL,
-    USE_ENHANCED_FEATURES,
-)
+from config.dart_config import get_config
+from ml.trading_ai_v3 import TradingAIv3
+
+config = get_config()
+CONFIDENCE_THRESHOLD = config.risk.confidence_threshold
+DEFAULT_CANDLE_COUNT = 50
+DEFAULT_THEME = "dark"
+DEFAULT_TIMEFRAME = "1 minute"
+DERIV_ACCESS_TOKEN = config.api.deriv_access_token
+DERIV_ACCOUNT_ID = config.api.deriv_account_id
+DERIV_APP_ID = config.api.deriv_app_id
+USE_DEEP_RL = config.ai.use_deep_rl
+USE_ENHANCED_FEATURES = config.ai.use_ensemble_ml
 from ml.auto_trader import AutoTrader
-from ml.trading_ai import TradingAI
 from ui.chart_styles import get_chart_style
 from ui.ui_theme import configure_styles, format_currency
 from utils.timeframe import get_granularity_mapping
@@ -38,7 +40,7 @@ class DerivApp:
 
     def __init__(self, root):
         self.root = root
-        self.root.title("DART - Deep Adaptive Reinforcement Trader v2.0")
+        self.root.title("DART - Deep Adaptive Reinforcement Trader v3.0")
 
         # Set window size and position
         window_width = 1400
@@ -56,14 +58,18 @@ class DerivApp:
         except Exception:
             pass
 
-        # Initialize the Deriv client with API token
-        self.client = DerivClient(app_id=DERIV_APP_ID, api_token=DERIV_API_TOKEN)
+        # Initialize the Deriv client with OAuth 2.0
+        self.client = DerivClient(
+            app_id=DERIV_APP_ID,
+            access_token=DERIV_ACCESS_TOKEN or None,
+            account_id=DERIV_ACCOUNT_ID or None,
+        )
 
         # Initialize the trading AI and auto-trader with enhanced features
-        self.trading_ai = TradingAI(
-            model_dir=os.path.join(os.path.dirname(os.path.dirname(__file__)), "models"),
-            use_deep_rl=USE_DEEP_RL,
-            use_enhanced_features=USE_ENHANCED_FEATURES,
+        self.trading_ai = TradingAIv3(
+            model_dir=config.model_dir,
+            use_llm=config.ai.use_llm_analysis,
+            require_real_llm=False,
         )
         self.auto_trader = AutoTrader(client=self.client, trading_ai=self.trading_ai)
 
@@ -519,10 +525,10 @@ class DerivApp:
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
 
     def _setup_ai_tab(self):
-        """Setup the AI management tab with v2.0 enhancements."""
+        """Setup the AI management tab with v3.0 enhancements."""
         # AI Model status
         model_frame = ttk.LabelFrame(
-            self.ai_tab, text="🤖 AI Model Status (v2.0)", padding=(10, 10),
+            self.ai_tab, text="🤖 AI Model Status (v3.0)", padding=(10, 10),
         )
         model_frame.pack(fill=tk.X, padx=10, pady=5)
 
@@ -534,7 +540,7 @@ class DerivApp:
         ttk.Label(info_frame, text="Model Type:", font=("Arial", 10, "bold")).grid(
             row=0, column=0, sticky=tk.W, padx=5,
         )
-        self.model_type_var = tk.StringVar(value="Ensemble Stacking + SAC v2.0")
+        self.model_type_var = tk.StringVar(value="Ensemble Stacking + SAC v3.0")
         ttk.Label(info_frame, textvariable=self.model_type_var).grid(
             row=0, column=1, sticky=tk.W, padx=5,
         )
@@ -581,9 +587,9 @@ class DerivApp:
             row=2, column=3, sticky=tk.W, padx=5,
         )
 
-        # v2.0 Uncertainty Metrics Frame
+        # v3.0 Uncertainty Metrics Frame
         uncertainty_frame = ttk.LabelFrame(
-            self.ai_tab, text="📊 v2.0 Uncertainty Metrics", padding=(10, 10),
+            self.ai_tab, text="📊 v3.0 Uncertainty Metrics", padding=(10, 10),
         )
         uncertainty_frame.pack(fill=tk.X, padx=10, pady=5)
 
@@ -651,7 +657,7 @@ class DerivApp:
         )
 
         # AI Features Configuration
-        features_frame = ttk.LabelFrame(self.ai_tab, text="🔬 AI Features (v2.0)", padding=(10, 10))
+        features_frame = ttk.LabelFrame(self.ai_tab, text="🔬 AI Features (v3.0)", padding=(10, 10))
         features_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
 
         # Feature toggles
@@ -719,9 +725,9 @@ class DerivApp:
         """Run AI model diagnostics."""
         messagebox.showinfo(
             "AI Diagnostics",
-            "🤖 DART v2.0 AI Diagnostics\n\n"
+            "🤖 DART v3.0 AI Diagnostics\n\n"
             "• Ensemble Model: Operational\n"
-            "• SAC v2.0 Agent: Ready\n"
+            "• SAC v3.0 Agent: Ready\n"
             "• Curiosity Module: Active\n"
             "• Monte Carlo VaR: Enabled\n"
             "• Market Regime Detector: Normal\n\n"
@@ -743,13 +749,13 @@ class DerivApp:
             row=0, column=1, sticky=tk.W, padx=5, pady=2,
         )
 
-        ttk.Label(api_frame, text="API Token:", font=("Arial", 10, "bold")).grid(
+        ttk.Label(api_frame, text="OAuth Token:", font=("Arial", 10, "bold")).grid(
             row=1, column=0, sticky=tk.W, padx=5, pady=2,
         )
-        self.api_token_var = tk.StringVar(
-            value=DERIV_API_TOKEN[:10] + "..." if DERIV_API_TOKEN else "",
+        self.access_token_var = tk.StringVar(
+            value=DERIV_ACCESS_TOKEN[:10] + "..." if DERIV_ACCESS_TOKEN else "(not set)",
         )
-        ttk.Entry(api_frame, textvariable=self.api_token_var, show="*", width=20).grid(
+        ttk.Entry(api_frame, textvariable=self.access_token_var, show="*", width=20).grid(
             row=1, column=1, sticky=tk.W, padx=5, pady=2,
         )
 
@@ -821,7 +827,7 @@ class DerivApp:
         self.status_bar.pack(side=tk.BOTTOM, fill=tk.X, padx=5, pady=2)
 
         # Status items
-        ttk.Label(self.status_bar, text="DART v2.0", font=("Arial", 8)).pack(side=tk.LEFT)
+        ttk.Label(self.status_bar, text="DART v3.0", font=("Arial", 8)).pack(side=tk.LEFT)
 
         self.status_connection_var = tk.StringVar(value="⚪ Disconnected")
         ttk.Label(self.status_bar, textvariable=self.status_connection_var, font=("Arial", 8)).pack(

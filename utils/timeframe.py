@@ -1,6 +1,9 @@
 def get_granularity_mapping():
-    """Return a mapping of timeframe strings to granularity values in seconds."""
-    return {
+    """Return timeframe strings mapped to granularity values in seconds."""
+    return dict(TIMEFRAME_MAPPING)
+
+
+TIMEFRAME_MAPPING: dict[str, int] = {
         "1 minute": 60,
         "2 minutes": 120,
         "3 minutes": 180,
@@ -14,3 +17,5 @@ def get_granularity_mapping():
         "8 hours": 28800,
         "1 day": 86400,
     }
+
+__all__ = ["get_granularity_mapping", "TIMEFRAME_MAPPING"]
