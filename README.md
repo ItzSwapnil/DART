@@ -91,11 +91,11 @@ DART/
 │   └── deriv_client.py              # Deriv API with trading, proposals, and account management
 │
 ├── ⚙️ config/                        # Configuration
-│   └── settings.py                  # API keys, trading parameters, and thresholds
+│   └── dart_config.py               # Pydantic v2 SOTA configuration settings and validator
 │
 ├── 🧠 ml/                            # Machine Learning Core
 │   ├── deep_rl_agent.py             # Soft Actor-Critic with attention & curiosity modules
-│   ├── trading_ai.py                # Ensemble learning and strategy generation
+│   ├── trading_ai_v3.py             # Ensemble learning and strategy generation
 │   ├── feature_extractor.py         # 50+ technical indicators and sentiment analysis
 │   ├── risk_manager.py              # Monte Carlo VaR, Kelly criterion, position sizing
 │   └── auto_trader.py               # Automated trade execution engine
@@ -115,7 +115,6 @@ DART/
 ├── 📁 tests/                         # Unit and integration tests
 │
 ├── 🚀 main.py                        # Desktop app entry point
-├── 🚀 dart_launcher_new.py           # Alternative launcher with enhancements
 └── 📋 pyproject.toml                 # Dependencies and project metadata
 ```
 
@@ -211,7 +210,7 @@ uv pip install -e ".[deep-learning]"
 
 ```bash
 python -c "import torch; print(f'PyTorch: {torch.__version__}')"
-python -c "from ml.trading_ai import TradingAI; print('DART AI: OK')"
+python -c "from ml.trading_ai_v3 import TradingAIv3; print('DART AI: OK')"
 ```
 
 ---
@@ -223,9 +222,6 @@ python -c "from ml.trading_ai import TradingAI; print('DART AI: OK')"
 ```bash
 # Launch the main application
 python main.py
-
-# Or use the enhanced launcher
-python dart_launcher_new.py
 ```
 
 **Quick Guide:**
@@ -252,20 +248,24 @@ The web dashboard features:
 ### 📊 Sample Trading Session
 
 ```python
-from ml.trading_ai import TradingAI
+from ml.trading_ai_v3 import TradingAIv3
 from api.deriv_client import DerivClient
 
 # Initialize components
-client = DerivClient(api_token="YOUR_TOKEN")
-ai = TradingAI(use_deep_rl=True, use_enhanced_features=True)
+client = DerivClient(
+    app_id="72212",
+    access_token="YOUR_ACCESS_TOKEN",
+    account_id="YOUR_ACCOUNT_ID"
+)
+ai = TradingAIv3(use_llm=True)
 
 # Get historical data and train
 data = await client.get_historical_data("R_75", 60, days=7)
-ai.train_model(data)
+ai.train(data)
 
 # Generate strategy
 current_data = await client.get_candles("R_75", 60, count=100)
-strategy = ai.generate_strategy(current_data)
+strategy = ai.generate_strategy(current_data, use_llm=True)
 
 print(f"Direction: {strategy['direction']}")
 print(f"Confidence: {strategy['confidence']:.2%}")
@@ -278,13 +278,18 @@ print(f"Uncertainty: {strategy['uncertainty']:.4f}")
 
 ### API Setup (Required for Trading)
 
-1. Create a [Deriv.com](https://deriv.com) account
-2. Go to [API Token Page](https://app.deriv.com/account/api-token)
-3. Create a token with: **Read, Trade, Payments, Admin, Trading information**
-4. Update `config/settings.py`:
+DART v3.0+ uses secure OAuth 2.0 PKCE authentication.
 
-```python
-DERIV_API_TOKEN = 'your_actual_token_here'
+1. Create a [Deriv.com](https://deriv.com) account.
+2. Register an application in the [Deriv Developer Portal](https://developers.deriv.com/) to obtain your **App ID** and **OAuth Client ID**. Set the Redirect URI to `http://localhost:8080/callback`.
+3. Set your environment variables in `.env` (located in the project root):
+
+```env
+DERIV_APP_ID=your_app_id
+DERIV_OAUTH_CLIENT_ID=your_client_id
+DERIV_OAUTH_REDIRECT_URI=http://localhost:8080/callback
+DERIV_ACCESS_TOKEN=your_access_token
+DERIV_ACCOUNT_ID=your_account_id
 ```
 
 ### Key Configuration Options
@@ -300,7 +305,7 @@ DERIV_API_TOKEN = 'your_actual_token_here'
 ### Risk Management Settings
 
 ```python
-# config/settings.py
+# config/dart_config.py
 MAX_PORTFOLIO_RISK = 0.02        # 2% portfolio risk per trade
 MAX_DRAWDOWN_THRESHOLD = 0.15   # 15% max drawdown
 VAR_CONFIDENCE_LEVELS = [0.95, 0.99]  # VaR confidence
