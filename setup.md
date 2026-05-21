@@ -113,22 +113,68 @@ If you wish to register a formal application:
 
 ---
 
-## 4. Setting up the AI Engine (vLLM & Qwen)
+## 4. Setting up the AI Engine (vLLM / Ollama)
 
 DART uses **Soft Actor-Critic (SAC)** Deep Reinforcement Learning (defined in [SoftActorCriticV2](file:///c:/Users/Swapnil/Projects/DART/ml/deep_rl_agent.py#L21)) combined with market regime detection and **LLM-based Market Analysis** (defined in [LLMMarketAnalyzer](file:///c:/Users/Swapnil/Projects/DART/ml/llm_market_analyzer.py#L21)).
 
-To power the LLM Market Analyzer, you must run an OpenAI-compatible local inference server. **vLLM** is recommended for high throughput and GPU acceleration on Windows (via WSL CUDA).
+To power the LLM Market Analyzer, you must run an OpenAI-compatible local inference server. 
 
-### Step 4.1: Start the local vLLM Server
-1. DART is configured to look for the LLM at `http://localhost:8000/v1` and expects `Qwen/Qwen2.5-1.5B-Instruct` (a fast, lightweight, instruction-following model).
-2. Inside WSL (with your GPU drivers and PyTorch configured), run:
+> [!IMPORTANT]
+> Because you are using **Python 3.14.5** for DART, packages like `vllm` (which depend on `llvmlite` and `numba` that do not support Python 3.14 yet) **cannot be installed in the same virtual environment**.
+> 
+> **Do NOT run `uv pip install vllm` inside DART's `.venv`.** Instead, run the LLM server externally using one of the two options below:
+
+### Option A: Run vLLM in a Separate Python 3.12 Virtual Environment
+vLLM supports Python 3.12 natively with pre-built wheels. You can create an isolated virtual environment specifically for hosting the model:
+
+1. Create a separate directory and environment in WSL:
+   ```bash
+   mkdir -p ~/vllm_server
+   cd ~/vllm_server
+   uv venv .venv --python 3.12
+   source .venv/bin/activate
+   ```
+2. Install `vllm`:
+   ```bash
+   uv pip install vllm
+   ```
+3. Launch the OpenAI-compatible server on port `8000`:
    ```bash
    python -m vllm.entrypoints.openai.api_server --model Qwen/Qwen2.5-1.5B-Instruct --port 8000
    ```
-3. The server will download the model weights from Hugging Face and start serving on port `8000`.
+4. Update your `[env](file:///c:/Users/Swapnil/Projects/DART/.env)` file to point to the server:
+   ```env
+   API__LLM_BASE_URL=http://localhost:8000/v1
+   AI__LLM_MODEL=Qwen/Qwen2.5-1.5B-Instruct
+   ```
+
+---
+
+### Option B: Use Ollama (Recommended & Zero Python Dependencies)
+Ollama runs as a native system binary. It does not require any Python virtual environment or package installation, making it extremely easy and lightweight to run alongside DART.
+
+1. Download and install Ollama in WSL:
+   ```bash
+   curl -fsSL https://ollama.com/install.sh | sh
+   ```
+2. Start the Ollama service:
+   ```bash
+   ollama serve
+   ```
+3. In another terminal window, pull the Qwen model:
+   ```bash
+   ollama pull qwen2.5:1.5b-instruct
+   ```
+4. Update your DART `[env](file:///c:/Users/Swapnil/Projects/DART/.env)` file to point to Ollama's OpenAI-compatible endpoint:
+   ```env
+   API__LLM_BASE_URL=http://localhost:11434/v1
+   AI__LLM_MODEL=qwen2.5:1.5b-instruct
+   ```
+
+---
 
 > [!TIP]
-> If you do not have a dedicated GPU or want to test without a local LLM server running, you can set `AI__REQUIRE_REAL_LLM=False` and `AI__USE_LLM_ANALYSIS=False` (or let it use fallback heuristics) in your configuration.
+> If you do not have a dedicated GPU or want to test without a local LLM server running, you can set `AI__REQUIRE_REAL_LLM=False` and `AI__USE_LLM_ANALYSIS=False` (or let it use fallback heuristics) in your `[env](file:///c:/Users/Swapnil/Projects/DART/.env)` configuration.
 
 ---
 
