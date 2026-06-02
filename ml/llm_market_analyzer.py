@@ -6,21 +6,15 @@ and provide intelligent trading insights.
 
 import json
 import logging
-from typing import Optional
-from datetime import datetime, timedelta
+from datetime import datetime
 
 import numpy as np
 import pandas as pd
-from langchain_openai import ChatOpenAI
-from langchain_core.prompts import PromptTemplate
 from langchain_core.output_parsers import StrOutputParser
+from langchain_core.prompts import PromptTemplate
+from langchain_openai import ChatOpenAI
 from sentence_transformers import SentenceTransformer, util
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-)
 logger = logging.getLogger("llm_market_analyzer")
 
 
@@ -51,11 +45,12 @@ class LLMMarketAnalyzer:
         self.is_real_llm_available = False
 
         # Initialize LLM
+        self.llm: ChatOpenAI | None = None
         try:
             self.llm = ChatOpenAI(
                 model=model_name,
                 openai_api_key="EMPTY",
-                openai_api_base=base_url,
+                base_url=base_url,
                 temperature=0.3,
                 max_tokens=512,
             )
@@ -63,9 +58,7 @@ class LLMMarketAnalyzer:
             logger.info(f"vLLM client initialized: {model_name} at {base_url}")
         except Exception as e:
             if not self.allow_fallback:
-                raise RuntimeError(
-                    f"Real vLLM backend unavailable for model '{model_name}' at {base_url}: {e}"
-                ) from e
+                raise RuntimeError(f"Real vLLM backend unavailable for model '{model_name}' at {base_url}: {e}") from e
             logger.warning(f"Failed to initialize vLLM: {e}. Using fallback mode.")
             self.llm = None
 
@@ -104,7 +97,7 @@ Format your response as JSON.""",
         # Sentiment analysis prompt
         self.sentiment_prompt = PromptTemplate(
             input_variables=["text"],
-            template="""Analyze the sentiment of the following market-related text. 
+            template="""Analyze the sentiment of the following market-related text.
 Return ONLY a JSON object with: {{"sentiment": "positive|negative|neutral", "score": 0-1, "confidence": 0-1}}
 
 Text: {text}""",
@@ -114,7 +107,7 @@ Text: {text}""",
         self,
         price_data: pd.DataFrame,
         technical_indicators: dict,
-        news_items: list = None,
+        news_items: list | None = None,
     ) -> dict:
         """
         Analyze market data using LLM.
@@ -145,11 +138,13 @@ Text: {text}""",
 
             # Create chain and run analysis
             chain = self.analysis_prompt | self.llm | StrOutputParser()
-            response = chain.invoke({
-                "market_data": market_summary,
-                "news": news_summary or "No recent news available",
-                "technical_indicators": indicators_text,
-            })
+            response = chain.invoke(
+                {
+                    "market_data": market_summary,
+                    "news": news_summary or "No recent news available",
+                    "technical_indicators": indicators_text,
+                }
+            )
 
             # Parse response
             analysis = self._parse_llm_response(response)
@@ -207,10 +202,10 @@ Text: {text}""",
         price_change = ((latest["close"] - previous["close"]) / previous["close"]) * 100
 
         summary = f"""
-Current Price: ${latest['close']:.2f}
-High (24h): ${price_data['high'].max():.2f}
-Low (24h): ${price_data['low'].min():.2f}
-Volume: {latest.get('volume', 0):,.0f}
+Current Price: ${latest["close"]:.2f}
+High (24h): ${price_data["high"].max():.2f}
+Low (24h): ${price_data["low"].min():.2f}
+Volume: {latest.get("volume", 0):,.0f}
 Price Change: {price_change:+.2f}%
 Candles Analyzed: {len(price_data)}
 """
@@ -268,10 +263,7 @@ Candles Analyzed: {len(price_data)}
         if len(price_data) < 2:
             trend = "NEUTRAL"
         else:
-            recent_change = (
-                (price_data.iloc[-1]["close"] - price_data.iloc[-5]["close"])
-                / price_data.iloc[-5]["close"]
-            )
+            recent_change = (price_data.iloc[-1]["close"] - price_data.iloc[-5]["close"]) / price_data.iloc[-5]["close"]
             if recent_change > 0.02:
                 trend = "BULLISH"
             elif recent_change < -0.02:

@@ -10,7 +10,7 @@ As per system instructions, this setup guide assumes you are running on **Window
 1. [Prerequisites & WSL Setup](#1-prerequisites--wsl-setup)
 2. [Installing uv & Project Dependencies](#2-installing-uv--project-dependencies)
 3. [Obtaining Deriv Developer Credentials (OAuth 2.0 PKCE)](#3-obtaining-deriv-developer-credentials-oauth-2-0-pkce)
-4. [Setting up the AI Engine (vLLM & Qwen)](#4-setting-up-the-ai-engine-vllm--qwen)
+4. [Setting up the AI Engine (vLLM / llama.cpp)](#4-setting-up-the-ai-engine-vllm--llamacpp)
 5. [Configuring Environment Variables (.env)](#5-configuring-environment-variables-env)
 6. [Running the System Components](#6-running-the-system-components)
 7. [Running Tests & Verifying Installation](#7-running-tests--verifying-installation)
@@ -113,36 +113,48 @@ If you wish to register a formal application:
 
 ---
 
-## 4. Setting up the AI Engine (vLLM / Ollama)
+## 4. Setting up the AI Engine (vLLM / llama.cpp)
 
 DART uses **Soft Actor-Critic (SAC)** Deep Reinforcement Learning (defined in [SoftActorCriticV2](file:///c:/Users/Swapnil/Projects/DART/ml/deep_rl_agent.py#L21)) combined with market regime detection and **LLM-based Market Analysis** (defined in [LLMMarketAnalyzer](file:///c:/Users/Swapnil/Projects/DART/ml/llm_market_analyzer.py#L21)).
 
-To power the LLM Market Analyzer, you must run an OpenAI-compatible local inference server. 
+To power the LLM Market Analyzer, you must run an OpenAI-compatible local inference server. Both options below run **directly inside DART's Python 3.14.5 `.venv`** — no separate environments needed.
+
+### Option A: vLLM (Recommended — GPU Accelerated)
+vLLM provides the highest throughput inference with CUDA GPU acceleration. The **nightly build** includes full Python 3.14.5 support with matched PyTorch ABI.
 
 > [!IMPORTANT]
-> Because you are using **Python 3.14.5** for DART, packages like `vllm` (which depend on `llvmlite` and `numba` that do not support Python 3.14 yet) **cannot be installed in the same virtual environment**.
-> 
-> **Do NOT run `uv pip install vllm` inside DART's `.venv`.** Instead, run the LLM server externally using one of the two options below:
+> You must install vLLM from the **nightly wheel index** to get Python 3.14.5 compatibility. The stable PyPI release (`0.21.0`) has a C++ ABI mismatch; the nightly (`0.21.1rc1.dev186+`) resolves this.
 
-### Option A: Run vLLM in a Separate Python 3.12 Virtual Environment
-vLLM supports Python 3.12 natively with pre-built wheels. You can create an isolated virtual environment specifically for hosting the model:
-
-1. Create a separate directory and environment in WSL:
+1. Ensure your DART `.venv` is active, then install vLLM from the nightly index:
    ```bash
-   mkdir -p ~/vllm_server
-   cd ~/vllm_server
-   uv venv .venv --python 3.12
    source .venv/bin/activate
+   uv pip install vllm --extra-index-url https://wheels.vllm.ai/nightly --upgrade
    ```
-2. Install `vllm`:
+   This will download ~900 MiB of packages (vLLM, flashinfer, CUDA kernels, etc.). On a `/mnt/c/` mounted filesystem, the install step uses full file copy (no hardlinks), so expect it to take 10–15 minutes.
+
+2. Verify the installation:
+   Because python packaging compiles CUDA runtime libraries inside the virtual environment package folder, you must export `LD_LIBRARY_PATH` so that `vllm._C` can find `libcudart.so.13`. We have created a helper script `test_vllm.sh` in the project root to do this automatically:
    ```bash
-   uv pip install vllm
+   bash test_vllm.sh
    ```
+   Alternatively, you can run the verification manually inside WSL:
+   ```bash
+   export LD_LIBRARY_PATH=$(find /mnt/c/Users/Swapnil/Projects/DART/.venv/lib/python3.14/site-packages/nvidia/ -type d -name "lib" | paste -sd : -):$LD_LIBRARY_PATH
+   python -c "import torch; print('CUDA:', torch.cuda.is_available()); from vllm import LLM; print('vLLM OK:', LLM)"
+   ```
+   Expected output:
+   ```
+   CUDA: True
+   vLLM OK: <class 'vllm.entrypoints.llm.LLM'>
+   ```
+
 3. Launch the OpenAI-compatible server on port `8000`:
    ```bash
    python -m vllm.entrypoints.openai.api_server --model Qwen/Qwen2.5-1.5B-Instruct --port 8000
    ```
-4. Update your `[env](file:///c:/Users/Swapnil/Projects/DART/.env)` file to point to the server:
+   The first run will download the model weights from Hugging Face (~3 GB). Subsequent starts are instant from cache.
+
+4. Update your [.env](file:///c:/Users/Swapnil/Projects/DART/.env) file:
    ```env
    API__LLM_BASE_URL=http://localhost:8000/v1
    AI__LLM_MODEL=Qwen/Qwen2.5-1.5B-Instruct
@@ -150,31 +162,32 @@ vLLM supports Python 3.12 natively with pre-built wheels. You can create an isol
 
 ---
 
-### Option B: Use Ollama (Recommended & Zero Python Dependencies)
-Ollama runs as a native system binary. It does not require any Python virtual environment or package installation, making it extremely easy and lightweight to run alongside DART.
+### Option B: llama.cpp (Lightweight Fallback — CPU or GPU)
+`llama-cpp-python` compiles and imports perfectly inside DART's Python 3.14.5 `.venv`. It's a good choice if you don't have an NVIDIA GPU or prefer a lighter-weight setup using quantized GGUF models.
 
-1. Download and install Ollama in WSL:
+1. Install the server package:
    ```bash
-   curl -fsSL https://ollama.com/install.sh | sh
+   source .venv/bin/activate
+   uv pip install "llama-cpp-python[server]"
    ```
-2. Start the Ollama service:
+2. Download a quantized model in GGUF format (e.g. Qwen2.5 1.5B Instruct Q4_K_M, ~1 GB):
    ```bash
-   ollama serve
+   hf download Qwen/Qwen2.5-1.5B-Instruct-GGUF qwen2.5-1.5b-instruct-q4_k_m.gguf --local-dir .
    ```
-3. In another terminal window, pull the Qwen model:
+3. Start the OpenAI-compatible server on port `8000`:
    ```bash
-   ollama pull qwen2.5:1.5b-instruct
+   python -m llama_cpp.server --model qwen2.5-1.5b-instruct-q4_k_m.gguf --port 8000
    ```
-4. Update your DART `[env](file:///c:/Users/Swapnil/Projects/DART/.env)` file to point to Ollama's OpenAI-compatible endpoint:
+4. Update your [.env](file:///c:/Users/Swapnil/Projects/DART/.env) file:
    ```env
-   API__LLM_BASE_URL=http://localhost:11434/v1
-   AI__LLM_MODEL=qwen2.5:1.5b-instruct
+   API__LLM_BASE_URL=http://localhost:8000/v1
+   AI__LLM_MODEL=qwen2.5-1.5b-instruct-q4_k_m.gguf
    ```
 
 ---
 
 > [!TIP]
-> If you do not have a dedicated GPU or want to test without a local LLM server running, you can set `AI__REQUIRE_REAL_LLM=False` and `AI__USE_LLM_ANALYSIS=False` (or let it use fallback heuristics) in your `[env](file:///c:/Users/Swapnil/Projects/DART/.env)` configuration.
+> If you do not have a dedicated GPU or want to test without a local LLM server running, you can set `AI__REQUIRE_REAL_LLM=False` and `AI__USE_LLM_ANALYSIS=False` (or let it use fallback heuristics) in your [.env](file:///c:/Users/Swapnil/Projects/DART/.env) configuration.
 
 ---
 
@@ -255,9 +268,9 @@ This runs the [AutoTrader](file:///c:/Users/Swapnil/Projects/DART/ml/auto_trader
 
 ## 7. Running Tests & Verifying Installation
 
-To ensure everything is correctly configured, run the pytest test suite in WSL:
+To ensure everything is correctly configured, run the pytest test suite in WSL using the provided test runner script:
 ```bash
-pytest
+bash run_tests.sh
 ```
 Expected output:
 ```
@@ -271,9 +284,20 @@ This verifies that all deep learning modules, config schemas, and websocket clie
 
 ## 💡 Troubleshooting Tips
 
-- **WSL Port Forwarding**: Windows automatically forwards ports from `localhost:8080` (OAuth callback) and `localhost:8000` (vLLM) to WSL. If you encounter connectivity errors, check your Windows Firewall settings.
-- **OutOfMemory (OOM) Errors**: If vLLM crashes with OOM, start the server with CPU execution only, or decrease the GPU utilization parameter:
+- **WSL Port Forwarding**: Windows automatically forwards ports from `localhost:8080` (OAuth callback) and `localhost:8000` (vLLM / llama.cpp) to WSL. If you encounter connectivity errors, check your Windows Firewall settings.
+- **OutOfMemory (OOM) Errors**: If vLLM crashes with OOM, decrease the GPU memory utilization parameter:
   ```bash
   python -m vllm.entrypoints.openai.api_server --model Qwen/Qwen2.5-1.5B-Instruct --gpu-memory-utilization 0.7
   ```
+  Alternatively, switch to llama.cpp with a smaller quantized model (Q4_K_M uses ~1 GB RAM).
+- **vLLM ABI Errors**: If you see `ImportError: undefined symbol: _ZN2at4cuda24getCurrentCUDABlasHandleEv`, you are on the wrong vLLM build. Reinstall from the nightly index:
+  ```bash
+  uv pip install vllm --extra-index-url https://wheels.vllm.ai/nightly --upgrade
+  ```
+- **ImportError: libcudart.so.13 or libcudnn.so.9**: If python fails to import `vllm` or `torch` with missing shared libraries (`.so` files), you need to set the `LD_LIBRARY_PATH` so python can locate the compiled CUDA and cuDNN runtime libraries in the virtualenv:
+  ```bash
+  export LD_LIBRARY_PATH=$(find /mnt/c/Users/Swapnil/Projects/DART/.venv/lib/python3.14/site-packages/nvidia/ -type d -name "lib" | paste -sd : -):$LD_LIBRARY_PATH
+  ```
+  You can also run the preconfigured `bash test_vllm.sh` or `bash run_tests.sh` scripts to run vLLM/tests with path forwarding configured automatically.
+- **Slow Installation on `/mnt/c/`**: Installing packages into a `.venv` on the Windows-mounted filesystem (`/mnt/c/`) is slower because `uv` falls back to full file copy instead of hardlinks. This is normal; large packages like vLLM take 10–15 minutes.
 - **Authentication Failures**: Double check that your `API__DERIV_ACCESS_TOKEN` is fresh. OAuth tokens expire; run the interactive login helper to generate a new token and update your `.env` file.

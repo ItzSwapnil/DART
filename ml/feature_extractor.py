@@ -5,20 +5,15 @@ as described in the project report.
 """
 
 import logging
-import warnings
 from datetime import datetime, timedelta
-from typing import Dict
+from typing import Any
 
 import numpy as np
 import pandas as pd
 import requests
 
-warnings.filterwarnings("ignore")
+from ml.candlestick_patterns import get_all_patterns
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-)
 logger = logging.getLogger("feature_extractor")
 
 
@@ -138,10 +133,12 @@ class MarketStructureAnalyzer:
 
         # Support and resistance levels
         patterns["support_levels"] = MarketStructureAnalyzer._find_support_resistance(
-            ohlc_data["low"], is_support=True,
+            ohlc_data["low"],
+            is_support=True,
         )
         patterns["resistance_levels"] = MarketStructureAnalyzer._find_support_resistance(
-            ohlc_data["high"], is_support=False,
+            ohlc_data["high"],
+            is_support=False,
         )
 
         # Trend analysis
@@ -212,7 +209,9 @@ class MarketStructureAnalyzer:
         vol_percentile = rolling_vol.rolling(window=window * 5).rank(pct=True)
 
         regime = np.where(
-            vol_percentile > 0.8, "high", np.where(vol_percentile < 0.2, "low", "medium"),
+            vol_percentile > 0.8,
+            "high",
+            np.where(vol_percentile < 0.2, "low", "medium"),
         )
 
         return pd.Series(regime, index=ohlc_data.index)
@@ -376,28 +375,15 @@ class SentimentAnalyzer:
         else:
             return 0.0
 
-    def _generate_mock_sentiment(self):
-        """Generate mock sentiment data for testing."""
-        return {
-            "average_sentiment": np.random.normal(0, 0.3),
-            "sentiment_trend": np.random.normal(0, 0.2),
-            "article_count": np.random.randint(5, 25),
-            "positive_count": np.random.randint(2, 10),
-            "negative_count": np.random.randint(1, 8),
-            "neutral_count": np.random.randint(3, 12),
-            "recent_articles": [],
-        }
+    def _generate_mock_sentiment(self) -> dict | None:
+        """Return None — no live sentiment source configured."""
+        logger.debug("No news API key configured; sentiment unavailable.")
+        return None
 
-    def analyze_social_sentiment(self, symbol):
-        """Analyze sentiment from social media (Simulation)."""
-        # Checks for Social Media API keys would go here.
-        # Currently running in Simulation Mode.
-        return {
-            "twitter_sentiment": np.random.normal(0, 0.4),
-            "reddit_sentiment": np.random.normal(0, 0.3),
-            "social_volume": np.random.randint(50, 500),
-            "mention_trend": np.random.normal(0, 0.2),
-        }
+    def analyze_social_sentiment(self, symbol: str) -> dict | None:
+        """Return None — no social media API configured."""
+        logger.debug("No social media API configured for %s; social sentiment unavailable.", symbol)
+        return None
 
 
 class FundamentalAnalyzer:
@@ -406,36 +392,21 @@ class FundamentalAnalyzer:
     def __init__(self, alpha_vantage_key=None):
         self.alpha_vantage_key = alpha_vantage_key
 
-    def get_economic_indicators(self):
-        """Get key economic indicators."""
-        # This would fetch real economic data
-        # For now, return mock data with realistic ranges
-        return {
-            "gdp_growth": np.random.normal(2.5, 1.0),  # GDP growth rate
-            "inflation_rate": np.random.normal(2.0, 0.5),  # Inflation rate
-            "unemployment_rate": np.random.normal(4.0, 1.0),  # Unemployment rate
-            "interest_rate": np.random.normal(1.5, 0.5),  # Federal funds rate
-            "dollar_index": np.random.normal(95, 5),  # US Dollar Index
-            "vix": np.random.normal(20, 8),  # VIX volatility index
-            "yield_curve_spread": np.random.normal(1.5, 0.5),  # 10Y-2Y spread
-            "commodity_index": np.random.normal(100, 15),  # Commodity price index
-        }
+    def get_economic_indicators(self) -> dict | None:
+        """Return None — no economic data API configured."""
+        if not self.alpha_vantage_key:
+            logger.debug("No Alpha Vantage API key; economic indicators unavailable.")
+            return None
+        # Real implementation would fetch from Alpha Vantage or FRED here
+        return None
 
-    def get_company_fundamentals(self, symbol):
-        """Get fundamental data for a specific company/asset."""
-        # This would fetch real fundamental data
-        # For now, return mock data
-        return {
-            "pe_ratio": np.random.normal(20, 10),
-            "price_to_book": np.random.normal(3, 1.5),
-            "debt_to_equity": np.random.normal(0.5, 0.3),
-            "roe": np.random.normal(0.15, 0.08),
-            "revenue_growth": np.random.normal(0.08, 0.15),
-            "earnings_growth": np.random.normal(0.12, 0.20),
-            "dividend_yield": np.random.normal(0.02, 0.02),
-            "market_cap": np.random.normal(10e9, 5e9),
-            "sector_performance": np.random.normal(0.05, 0.10),
-        }
+    def get_company_fundamentals(self, symbol: str) -> dict | None:
+        """Return None — no fundamental data API configured."""
+        if not self.alpha_vantage_key:
+            logger.debug("No Alpha Vantage API key; fundamentals for %s unavailable.", symbol)
+            return None
+        # Real implementation would fetch from Alpha Vantage here
+        return None
 
 
 class MultiModalFeatureExtractor:
@@ -459,7 +430,7 @@ class MultiModalFeatureExtractor:
         ohlcv_data: pd.DataFrame,
         include_sentiment=True,
         include_fundamentals=True,
-    ) -> Dict:
+    ) -> dict:
         """
         Extract comprehensive features from all data sources.
 
@@ -495,6 +466,9 @@ class MultiModalFeatureExtractor:
         # Price action features
         features["price_action"] = self._extract_price_action_features(ohlcv_data)
 
+        # Candlestick pattern features
+        features["candlestick_patterns"] = self._extract_candlestick_patterns(ohlcv_data)
+
         # Sentiment features
         if include_sentiment:
             features["sentiment"] = self._extract_sentiment_features(symbol)
@@ -516,27 +490,19 @@ class MultiModalFeatureExtractor:
 
         return features
 
-    def _extract_technical_features(self, data: pd.DataFrame) -> Dict:
+    def _extract_technical_features(self, data: pd.DataFrame) -> dict:
         """Extract technical indicator features."""
 
         close = data["close"] if "close" in data.columns else data["Close"]
         high = data["high"] if "high" in data.columns else data["High"]
         low = data["low"] if "low" in data.columns else data["Low"]
-        _volume = (
-            data["volume"]
-            if "volume" in data.columns
-            else data.get("Volume", pd.Series([1] * len(data)))
-        )  # noqa: F841
+        _volume = data["volume"] if "volume" in data.columns else data.get("Volume", pd.Series([1] * len(data)))
 
         features = {}
 
         # Trend indicators
-        features["rsi_14"] = (
-            self.technical_indicators.calculate_rsi(close, 14).iloc[-1] if len(close) > 14 else 50
-        )
-        features["rsi_21"] = (
-            self.technical_indicators.calculate_rsi(close, 21).iloc[-1] if len(close) > 21 else 50
-        )
+        features["rsi_14"] = self.technical_indicators.calculate_rsi(close, 14).iloc[-1] if len(close) > 14 else 50
+        features["rsi_21"] = self.technical_indicators.calculate_rsi(close, 21).iloc[-1] if len(close) > 21 else 50
 
         # MACD
         macd, signal, histogram = self.technical_indicators.calculate_macd(close)
@@ -545,9 +511,7 @@ class MultiModalFeatureExtractor:
         features["macd_histogram"] = histogram.iloc[-1] if len(histogram) > 0 else 0
 
         # Bollinger Bands
-        bb_upper, bb_lower, bb_width, bb_position = (
-            self.technical_indicators.calculate_bollinger_bands(close)
-        )
+        _bb_upper, _bb_lower, bb_width, bb_position = self.technical_indicators.calculate_bollinger_bands(close)
         features["bb_width"] = bb_width.iloc[-1] if len(bb_width) > 0 else 0
         features["bb_position"] = bb_position.iloc[-1] if len(bb_position) > 0 else 0.5
 
@@ -557,11 +521,7 @@ class MultiModalFeatureExtractor:
         features["stoch_d"] = stoch_d.iloc[-1] if len(stoch_d) > 0 else 50
 
         # ATR
-        features["atr"] = (
-            self.technical_indicators.calculate_atr(high, low, close).iloc[-1]
-            if len(close) > 14
-            else 0
-        )
+        features["atr"] = self.technical_indicators.calculate_atr(high, low, close).iloc[-1] if len(close) > 14 else 0
 
         # ADX
         adx, plus_di, minus_di = self.technical_indicators.calculate_adx(high, low, close)
@@ -571,17 +531,11 @@ class MultiModalFeatureExtractor:
 
         # Williams %R
         features["williams_r"] = (
-            self.technical_indicators.calculate_williams_r(high, low, close).iloc[-1]
-            if len(close) > 14
-            else -50
+            self.technical_indicators.calculate_williams_r(high, low, close).iloc[-1] if len(close) > 14 else -50
         )
 
         # CCI
-        features["cci"] = (
-            self.technical_indicators.calculate_cci(high, low, close).iloc[-1]
-            if len(close) > 20
-            else 0
-        )
+        features["cci"] = self.technical_indicators.calculate_cci(high, low, close).iloc[-1] if len(close) > 20 else 0
 
         # Moving averages
         for period in [5, 10, 20, 50]:
@@ -599,15 +553,13 @@ class MultiModalFeatureExtractor:
 
         return features
 
-    def _extract_market_structure_features(self, data: pd.DataFrame) -> Dict:
+    def _extract_market_structure_features(self, data: pd.DataFrame) -> dict:
         """Extract market structure features."""
 
         patterns = self.market_analyzer.calculate_price_patterns(data)
 
         features = {}
-        features["trend_strength"] = (
-            patterns["trend_strength"].iloc[-1] if len(patterns["trend_strength"]) > 0 else 0
-        )
+        features["trend_strength"] = patterns["trend_strength"].iloc[-1] if len(patterns["trend_strength"]) > 0 else 0
         features["trend_direction"] = (
             patterns["trend_direction"].iloc[-1] if len(patterns["trend_direction"]) > 0 else 0
         )
@@ -619,13 +571,14 @@ class MultiModalFeatureExtractor:
             else 0
         )
         features["support_resistance_ratio"] = len(patterns["support_levels"]) / max(
-            len(patterns["resistance_levels"]), 1,
+            len(patterns["resistance_levels"]),
+            1,
         )
         features["gap_count"] = len(patterns["gaps"])
 
         return features
 
-    def _extract_temporal_features(self, data: pd.DataFrame) -> Dict:
+    def _extract_temporal_features(self, data: pd.DataFrame) -> dict:
         """Extract time-based features."""
 
         features = {}
@@ -668,7 +621,7 @@ class MultiModalFeatureExtractor:
 
         return features
 
-    def _extract_volatility_features(self, data: pd.DataFrame) -> Dict:
+    def _extract_volatility_features(self, data: pd.DataFrame) -> dict:
         """Extract volatility-related features."""
 
         close = data["close"] if "close" in data.columns else data["Close"]
@@ -689,9 +642,7 @@ class MultiModalFeatureExtractor:
             features["return_kurtosis"] = returns.kurtosis()
 
             # Volatility clustering
-            features["vol_clustering"] = (
-                returns.rolling(window=10).std().std() if len(returns) > 10 else 0
-            )
+            features["vol_clustering"] = returns.rolling(window=10).std().std() if len(returns) > 10 else 0
         else:
             features["realized_volatility"] = 0
             features["return_skewness"] = 0
@@ -712,30 +663,23 @@ class MultiModalFeatureExtractor:
 
         return features
 
-    def _extract_volume_features(self, data: pd.DataFrame) -> Dict:
+    def _extract_volume_features(self, data: pd.DataFrame) -> dict:
         """Extract volume-related features."""
 
         close = data["close"] if "close" in data.columns else data["Close"]
         high = data["high"] if "high" in data.columns else data["High"]
         low = data["low"] if "low" in data.columns else data["Low"]
-        volume = (
-            data["volume"]
-            if "volume" in data.columns
-            else data.get("Volume", pd.Series([1] * len(data)))
-        )
+        volume = data["volume"] if "volume" in data.columns else data.get("Volume", pd.Series([1] * len(data)))
 
         features = {}
 
         if len(volume) > 0 and volume.sum() > 0:
             # Volume indicators
             features["volume_ratio"] = (
-                volume.iloc[-1] / volume.rolling(window=20).mean().iloc[-1]
-                if len(volume) > 20
-                else 1
+                volume.iloc[-1] / volume.rolling(window=20).mean().iloc[-1] if len(volume) > 20 else 1
             )
             features["volume_trend"] = (
-                volume.rolling(window=10).mean().iloc[-1]
-                / volume.rolling(window=20).mean().iloc[-1]
+                volume.rolling(window=10).mean().iloc[-1] / volume.rolling(window=20).mean().iloc[-1]
                 if len(volume) > 20
                 else 1
             )
@@ -764,7 +708,7 @@ class MultiModalFeatureExtractor:
 
         return features
 
-    def _extract_price_action_features(self, data: pd.DataFrame) -> Dict:
+    def _extract_price_action_features(self, data: pd.DataFrame) -> dict:
         """Extract price action features."""
 
         open_price = data["open"] if "open" in data.columns else data["Open"]
@@ -790,9 +734,7 @@ class MultiModalFeatureExtractor:
                 features["upper_shadow"] = upper_shadow.iloc[-1]
                 features["lower_shadow"] = lower_shadow.iloc[-1]
                 features["body_position"] = (
-                    ((close - low) / (high - low)).iloc[-1]
-                    if (high.iloc[-1] - low.iloc[-1]) > 0
-                    else 0.5
+                    ((close - low) / (high - low)).iloc[-1] if (high.iloc[-1] - low.iloc[-1]) > 0 else 0.5
                 )
             else:
                 features["body_size"] = 0
@@ -801,12 +743,8 @@ class MultiModalFeatureExtractor:
                 features["body_position"] = 0.5
 
             # Price momentum
-            features["momentum_10"] = (
-                (close.iloc[-1] / close.iloc[-10] - 1) if len(close) > 10 else 0
-            )
-            features["momentum_20"] = (
-                (close.iloc[-1] / close.iloc[-20] - 1) if len(close) > 20 else 0
-            )
+            features["momentum_10"] = (close.iloc[-1] / close.iloc[-10] - 1) if len(close) > 10 else 0
+            features["momentum_20"] = (close.iloc[-1] / close.iloc[-20] - 1) if len(close) > 20 else 0
         else:
             features["price_change_1"] = 0
             features["price_change_5"] = 0
@@ -820,56 +758,89 @@ class MultiModalFeatureExtractor:
 
         return features
 
-    def _extract_sentiment_features(self, symbol: str) -> Dict:
-        """Extract sentiment features."""
+    def _extract_sentiment_features(self, symbol: str) -> dict:
+        """Extract sentiment features.
 
+        Returns neutral defaults when sentiment APIs are not configured.
+        """
         # News sentiment
         news_sentiment = self.sentiment_analyzer.analyze_news_sentiment(symbol)
 
         # Social sentiment
         social_sentiment = self.sentiment_analyzer.analyze_social_sentiment(symbol)
 
-        features = {
-            "news_sentiment": news_sentiment["average_sentiment"],
-            "news_trend": news_sentiment["sentiment_trend"],
-            "news_volume": news_sentiment["article_count"],
-            "twitter_sentiment": social_sentiment["twitter_sentiment"],
-            "reddit_sentiment": social_sentiment["reddit_sentiment"],
-            "social_volume": social_sentiment["social_volume"],
-            "mention_trend": social_sentiment["mention_trend"],
-        }
+        features: dict = {}
+        if news_sentiment is not None:
+            features["news_sentiment"] = news_sentiment.get("average_sentiment", 0.0)
+            features["news_trend"] = news_sentiment.get("sentiment_trend", 0.0)
+            features["news_volume"] = news_sentiment.get("article_count", 0)
+        else:
+            features["news_sentiment"] = 0.0
+            features["news_trend"] = 0.0
+            features["news_volume"] = 0
+
+        if social_sentiment is not None:
+            features["twitter_sentiment"] = social_sentiment.get("twitter_sentiment", 0.0)
+            features["reddit_sentiment"] = social_sentiment.get("reddit_sentiment", 0.0)
+            features["social_volume"] = social_sentiment.get("social_volume", 0)
+            features["mention_trend"] = social_sentiment.get("mention_trend", 0.0)
+        else:
+            features["twitter_sentiment"] = 0.0
+            features["reddit_sentiment"] = 0.0
+            features["social_volume"] = 0
+            features["mention_trend"] = 0.0
 
         return features
 
-    def _extract_fundamental_features(self, symbol: str) -> Dict:
-        """Extract fundamental features."""
+    def _extract_fundamental_features(self, symbol: str) -> dict:
+        """Extract fundamental features.
+
+        Returns empty dict when fundamental data APIs are not configured.
+        """
+        features: dict = {}
 
         # Economic indicators
         economic_data = self.fundamental_analyzer.get_economic_indicators()
+        if economic_data is not None:
+            features.update(economic_data)
 
         # Company fundamentals
         company_data = self.fundamental_analyzer.get_company_fundamentals(symbol)
-
-        features = {**economic_data, **company_data}
+        if company_data is not None:
+            features.update(company_data)
 
         return features
 
-    def _extract_cross_asset_features(self, symbol: str) -> Dict:
-        """Extract cross-asset correlation features."""
+    def _extract_candlestick_patterns(self, data: pd.DataFrame) -> dict:
+        """Extract candlestick pattern indicators."""
+        try:
+            patterns_df = get_all_patterns(data)
+            if len(patterns_df) > 0:
+                latest = patterns_df.iloc[-1]
+                return {col: float(latest[col]) for col in patterns_df.columns}
+        except Exception as e:
+            logger.error(f"Error extracting candlestick patterns: {e}")
 
-        # This would normally fetch data for correlated assets
-        # For now, return mock correlation data
-        features = {
-            "sp500_correlation": np.random.normal(0.5, 0.3),
-            "dollar_correlation": np.random.normal(-0.2, 0.4),
-            "vix_correlation": np.random.normal(-0.3, 0.3),
-            "bond_correlation": np.random.normal(-0.1, 0.3),
-            "commodity_correlation": np.random.normal(0.1, 0.4),
+        return {
+            "pattern_doji": 0,
+            "pattern_hammer": 0,
+            "pattern_inverted_hammer": 0,
+            "pattern_bullish_engulfing": 0,
+            "pattern_bearish_engulfing": 0,
+            "pattern_marubozu": 0,
+            "pattern_morning_star": 0,
+            "pattern_evening_star": 0,
         }
 
-        return features
+    def _extract_cross_asset_features(self, symbol: str) -> dict:
+        """Extract cross-asset correlation features.
 
-    def _engineer_interaction_features(self, features: Dict) -> Dict:
+        Returns empty dict — no cross-asset data source configured.
+        """
+        logger.debug("No cross-asset data source configured for %s.", symbol)
+        return {}
+
+    def _engineer_interaction_features(self, features: dict) -> dict:
         """Engineer interaction and derived features."""
 
         engineered = {}
@@ -888,7 +859,7 @@ class MultiModalFeatureExtractor:
 
             # Trend alignment
             if "market_structure" in features:
-                _ms = features["market_structure"]  # noqa: F841 - reserved for future feature interactions
+                _ms = features["market_structure"]
                 engineered["trend_alignment"] = tech.get("plus_di", 25) - tech.get("minus_di", 25)
 
         # Sentiment-technical divergence
@@ -905,10 +876,10 @@ class MultiModalFeatureExtractor:
 
         return engineered
 
-    def _normalize_features(self, features: Dict) -> Dict:
+    def _normalize_features(self, features: dict) -> dict:
         """Normalize features to standard ranges."""
 
-        normalized = {}
+        normalized: dict[str, Any] = {}
 
         # Define normalization ranges for different feature types
         # Normalization ranges for reference - normalization is done inline below
@@ -921,20 +892,11 @@ class MultiModalFeatureExtractor:
                 for feature_name, value in feature_dict.items():
                     if isinstance(value, (int, float)) and not np.isnan(value):
                         # Determine normalization method based on feature name
-                        if any(
-                            indicator in feature_name.lower()
-                            for indicator in ["rsi", "stoch", "mfi"]
-                        ):
-                            normalized[category][feature_name] = (
-                                value - 50
-                            ) / 50  # Center around 0
+                        if any(indicator in feature_name.lower() for indicator in ["rsi", "stoch", "mfi"]):
+                            normalized[category][feature_name] = (value - 50) / 50  # Center around 0
                         elif "williams_r" in feature_name.lower():
-                            normalized[category][feature_name] = (
-                                value + 50
-                            ) / 50  # Center around 0
-                        elif any(
-                            term in feature_name.lower() for term in ["sentiment", "correlation"]
-                        ):
+                            normalized[category][feature_name] = (value + 50) / 50  # Center around 0
+                        elif any(term in feature_name.lower() for term in ["sentiment", "correlation"]):
                             normalized[category][feature_name] = np.clip(value, -1, 1)
                         elif "ratio" in feature_name.lower():
                             normalized[category][feature_name] = np.clip((value - 1), -1, 1)
@@ -946,7 +908,7 @@ class MultiModalFeatureExtractor:
 
         return normalized
 
-    def get_feature_vector(self, features: Dict, feature_selection=None) -> np.ndarray:
+    def get_feature_vector(self, features: dict, feature_selection: Any = None) -> tuple[np.ndarray, list[str]]:
         """Convert features dictionary to a flattened feature vector."""
 
         if feature_selection is None:
@@ -970,22 +932,3 @@ class MultiModalFeatureExtractor:
         flatten_dict(feature_selection)
 
         return np.array(vector), feature_names
-
-    def get_feature_importance_analysis(self, features: Dict) -> Dict:
-        """Analyze feature importance and correlations."""
-
-        # This would normally use the trained model to get feature importance
-        # For now, return a mock analysis
-
-        analysis = {
-            "high_importance": ["rsi_14", "macd_strength", "volume_ratio", "news_sentiment"],
-            "medium_importance": ["bb_position", "atr", "trend_strength", "realized_volatility"],
-            "low_importance": ["hour", "day_of_week", "upper_shadow", "lower_shadow"],
-            "feature_correlations": {
-                "rsi_momentum": ["price_change_1", "macd_strength"],
-                "volume_ratio": ["news_volume", "social_volume"],
-                "trend_alignment": ["adx", "trend_strength"],
-            },
-        }
-
-        return analysis

@@ -3,9 +3,12 @@ SOTA Configuration Management for DART v3.0
 Using Pydantic v2 for type-safe configuration with validation.
 """
 
-from typing import Optional
+import logging
+
 from pydantic import BaseModel, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+logger = logging.getLogger(__name__)
 
 
 class RiskManagementSettings(BaseModel):
@@ -21,7 +24,7 @@ class RiskManagementSettings(BaseModel):
 
     @field_validator("max_portfolio_risk", "max_position_size", "max_drawdown")
     @classmethod
-    def validate_percentages(cls, v):
+    def validate_percentages(cls, v: float) -> float:
         if not 0 <= v <= 1:
             raise ValueError("Value must be between 0 and 1")
         return v
@@ -67,7 +70,7 @@ class TradingSettings(BaseModel):
 
     @field_validator("granularity")
     @classmethod
-    def validate_granularity(cls, v):
+    def validate_granularity(cls, v: int) -> int:
         if v not in [15, 30, 60, 120, 300, 600, 900, 1800, 3600]:
             raise ValueError("Invalid granularity")
         return v
@@ -84,9 +87,7 @@ class APISettings(BaseModel):
     )
     deriv_access_token: str = Field(default="", description="OAuth 2.0 access token")
     deriv_account_id: str = Field(default="", description="Deriv Options account ID")
-    llm_base_url: str = Field(default="http://localhost:8000/v1", description="vLLM (OpenAI-compatible) API URL")
-    news_api_key: Optional[str] = Field(default=None, description="NewsAPI key")
-    alpha_vantage_key: Optional[str] = Field(default=None, description="Alpha Vantage key")
+    llm_base_url: str = Field(default="http://localhost:8000/v1", description="Local vLLM (OpenAI-compatible) API URL")
 
 
 class MonitoringSettings(BaseModel):
@@ -134,23 +135,23 @@ class DARTSettings(BaseSettings):
 
     def validate_configuration(self) -> bool:
         """Validate critical configuration."""
-        warnings = []
+        warnings_list: list[str] = []
 
         if not self.api.deriv_access_token:
-            warnings.append("Deriv OAuth access_token not set. Trading will not work.")
-            warnings.append("  → Run OAuth login or set DERIV_ACCESS_TOKEN in .env")
+            warnings_list.append("Deriv OAuth access_token not set. Trading will not work.")
+            warnings_list.append("  → Run OAuth login or set DERIV_ACCESS_TOKEN in .env")
 
         if not self.api.deriv_account_id:
-            warnings.append("Deriv account_id not set. Will auto-detect from REST API if token is available.")
+            warnings_list.append("Deriv account_id not set. Will auto-detect from REST API if token is available.")
 
         if self.ai.use_llm_analysis:
-            print(f"Info: LLM analysis enabled with model: {self.ai.llm_model}")
-            print(f"  Requires vLLM running at: {self.api.llm_base_url}")
+            logger.info("LLM analysis enabled with model: %s", self.ai.llm_model)
+            logger.info("  Requires vLLM running at: %s", self.api.llm_base_url)
 
-        for w in warnings:
-            print(f"Warning: {w}")
+        for w in warnings_list:
+            logger.warning(w)
 
-        return len(warnings) == 0
+        return len(warnings_list) == 0
 
     def __repr__(self) -> str:
         """String representation."""
@@ -167,7 +168,7 @@ class DARTSettings(BaseSettings):
 
 
 # Global configuration instance
-_config: Optional[DARTSettings] = None
+_config: DARTSettings | None = None
 
 
 def get_config() -> DARTSettings:
@@ -183,3 +184,6 @@ def load_config(path: str = ".env") -> DARTSettings:
     global _config
     _config = DARTSettings(_env_file=path)
     return _config
+
+
+__all__ = ["DARTSettings", "get_config", "load_config"]

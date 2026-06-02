@@ -4,18 +4,13 @@ import json
 import logging
 import os
 import threading
-
-import numpy as np
-import pandas as pd
+from typing import Any
 
 from api.deriv_client import DerivClient
+from api.websocket_server import DARTWebSocketServer
 from config.dart_config import get_config
 from ml.trading_ai_v3 import TradingAIv3
 
-# Configure logging first
-logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-)
 logger = logging.getLogger("auto_trader")
 
 # Import new components with graceful fallback
@@ -75,13 +70,13 @@ class AutoTrader:
         # Performance tracking
         self.trade_count = 0
         self.successful_trades = 0
-        self.trade_history = []
+        self.trade_history: list[dict] = []
         self.performance_by_hour = {hour: {"trades": 0, "wins": 0} for hour in range(24)}
-        self.performance_by_market = {}
+        self.performance_by_market: dict[str, dict] = {}
 
         # Model management
         self.last_model_training = None
-        self.model_performance_history = []
+        self.model_performance_history: list[dict] = []
 
         # Adaptive trade sizing
         config = get_config()
@@ -90,25 +85,56 @@ class AutoTrader:
         self.trade_size_multiplier = 1.0
 
         # Status and callbacks
-        self.status_callbacks = []
+        self.status_callbacks: list[Any] = []
         self.trading_paused = False
         self.pause_reason = None
+        self.custom_confidence_threshold = None
+
+        # Portfolio Management & WebSocket
+        self.ws_server = None
+        self.symbol_models: dict[str, Any] = {}
+        self.symbol_last_training: dict[str, Any] = {}
+        self.symbols: list[str] = []
+        self.background_tasks: set[Any] = set()
+
+        # Risk control: consecutive loss tracking
+        self.consecutive_losses = 0
+        self.symbol_cooldowns: dict[str, datetime.datetime] = {}
+        self.symbol_consecutive_losses: dict[str, int] = {}
 
         # Create logs directory
         self.logs_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "logs")
         os.makedirs(self.logs_dir, exist_ok=True)
+
+    def get_model_for_symbol(self, symbol: str) -> TradingAIv3:
+        """Get or lazily create and train a symbol-specific TradingAIv3 instance."""
+        if symbol not in self.symbol_models:
+            config = get_config()
+            self.symbol_models[symbol] = TradingAIv3(
+                model_dir=config.model_dir,
+                use_llm=config.ai.use_llm_analysis,
+                require_real_llm=False,
+                eval_pipeline=self.trading_ai.eval_pipeline if self.trading_ai else None,
+            )
+            logger.info(f"Initialized symbol-specific model for {symbol}")
+        return self.symbol_models[symbol]
 
     def register_status_callback(self, callback):
         """Register a callback function to receive status updates."""
         self.status_callbacks.append(callback)
 
     def _notify_status(self, status_data):
-        """Notify all registered callbacks with status updates."""
+        """Notify all registered callbacks and WebSocket server with status updates."""
         for callback in self.status_callbacks:
             try:
                 callback(status_data)
             except Exception as e:
                 logger.error(f"Error in status callback: {e}")
+        if self.ws_server:
+            try:
+                self.ws_server.broadcast(status_data)
+            except Exception as e:
+                logger.error(f"Error broadcasting status via WebSockets: {e}")
 
     async def check_api_connection(self):
         """
@@ -119,19 +145,20 @@ class AutoTrader:
         """
         try:
             # Check if the client has a circuit breaker and if it's open
-            if hasattr(self.client, '_circuit_breaker'):
+            if hasattr(self.client, "_circuit_breaker"):
                 from utils.api_utils import CircuitState
+
                 cb_state = self.client._circuit_breaker.state
                 if cb_state != CircuitState.CLOSED:
                     logger.warning(
-                        f"API circuit breaker is {cb_state.value}. "
-                        "Waiting for recovery...",
+                        f"API circuit breaker is {cb_state.value}. Waiting for recovery...",
                     )
-                    self._notify_status({
-                        "status": "warning",
-                        "message": f"API circuit breaker {cb_state.value}. "
-                                   "Waiting for recovery...",
-                    })
+                    self._notify_status(
+                        {
+                            "status": "warning",
+                            "message": f"API circuit breaker {cb_state.value}. Waiting for recovery...",
+                        }
+                    )
                     return False
 
             # Check actual connection
@@ -139,19 +166,23 @@ class AutoTrader:
 
             if not is_connected:
                 logger.warning("API connection check failed")
-                self._notify_status({
-                    "status": "warning",
-                    "message": "API connection lost. Attempting reconnection...",
-                })
+                self._notify_status(
+                    {
+                        "status": "warning",
+                        "message": "API connection lost. Attempting reconnection...",
+                    }
+                )
 
                 # Try to re-establish connection
                 account_info = await self.client.get_account_info()
                 if account_info:
                     logger.info("API connection re-established")
-                    self._notify_status({
-                        "status": "info",
-                        "message": "API connection re-established",
-                    })
+                    self._notify_status(
+                        {
+                            "status": "info",
+                            "message": "API connection re-established",
+                        }
+                    )
                     return True
                 else:
                     return False
@@ -160,10 +191,12 @@ class AutoTrader:
 
         except Exception as e:
             logger.error(f"Error checking API connection: {e}")
-            self._notify_status({
-                "status": "error",
-                "message": f"Connection check failed: {str(e)}",
-            })
+            self._notify_status(
+                {
+                    "status": "error",
+                    "message": f"Connection check failed: {e!s}",
+                }
+            )
             return False
 
     async def train_model(self, symbol, granularity):
@@ -173,7 +206,9 @@ class AutoTrader:
         # Get historical data for training
         config = get_config()
         historical_data = await self.client.get_historical_data(
-            symbol, granularity, days=config.ai.training_data_days,
+            symbol,
+            granularity,
+            days=config.ai.training_data_days,
         )
 
         if not historical_data or len(historical_data) < 100:
@@ -189,19 +224,22 @@ class AutoTrader:
             },
         )
 
-        # Train the model
-        metrics = self.trading_ai.train(historical_data)
+        # Train the model in a background thread to avoid blocking the asyncio loop
+        model = self.get_model_for_symbol(symbol)
+        metrics = await asyncio.to_thread(model.train, historical_data)
 
         if not metrics:
-            message = "Model training failed"
+            message = f"Model training failed for {symbol}"
             logger.error(message)
             self._notify_status({"status": "error", "message": message})
             return False
 
-        self.last_model_training = datetime.datetime.now()
+        now_time = datetime.datetime.now()
+        self.symbol_last_training[symbol] = now_time
+        self.last_model_training = now_time
 
         self._notify_status(
-            {"status": "trained", "message": "Model training completed", "metrics": metrics},
+            {"status": "trained", "message": f"Model training completed for {symbol}", "metrics": metrics},
         )
 
         return True
@@ -228,10 +266,11 @@ class AutoTrader:
             return None
 
         # Generate strategy using TradingAIv3 (which has Deep RL integrated)
-        strategy = self.trading_ai.generate_strategy(recent_data)
+        model = self.get_model_for_symbol(symbol)
+        strategy = model.generate_strategy(recent_data, granularity=granularity)
 
         if not strategy:
-            message = "Failed to generate strategy. Please train the model first."
+            message = f"Failed to generate strategy for {symbol}. Please train the model first."
             logger.warning(message)
             self._notify_status({"status": "error", "message": message})
             return None
@@ -275,8 +314,7 @@ class AutoTrader:
                     recommended_amount = abs(risk_recommendation["capital_allocation"])
                     config = get_config()
                     recommended_amount = max(
-                        config.trading.min_trade_amount,
-                        min(recommended_amount, config.trading.max_trade_amount)
+                        config.trading.min_trade_amount, min(recommended_amount, config.trading.max_trade_amount)
                     )
                     strategy["recommended_amount"] = recommended_amount
                     strategy["risk_approved"] = True
@@ -344,32 +382,47 @@ class AutoTrader:
         duration_unit = strategy["duration_unit"]
 
         # Check if the duration is supported for this market
+        # Normalize duration to seconds for comparison (available_durations are in seconds)
+        unit_to_seconds = {"s": 1, "m": 60, "h": 3600, "d": 86400, "t": 1}
+        duration_in_seconds = duration * unit_to_seconds.get(duration_unit, 1)
+
         try:
             available_durations = await self.client.get_available_durations(symbol, contract_type)
 
-            if available_durations and duration not in available_durations:
-                original_duration = duration
+            if available_durations and duration_in_seconds not in available_durations:
+                original_seconds = duration_in_seconds
 
-                # Find the closest supported duration
+                # Find the closest supported duration (in seconds)
                 if available_durations:
-                    # Find the closest duration (prefer longer over shorter if equidistant)
-                    closest_duration = min(
-                        available_durations, key=lambda x: (abs(x - duration), -x),
+                    closest_seconds = min(
+                        available_durations,
+                        key=lambda x: (abs(x - duration_in_seconds), -x),
                     )
-                    duration = closest_duration
+                    duration_in_seconds = closest_seconds
+
+                    # Convert back to the best unit
+                    if duration_in_seconds >= 120 and duration_in_seconds % 60 == 0:
+                        duration = duration_in_seconds // 60
+                        duration_unit = "m"
+                    else:
+                        duration = duration_in_seconds
+                        duration_unit = "s"
 
                     logger.info(
-                        f"Adjusted duration from {original_duration}s to {duration}s for {symbol} (supported durations: {available_durations})",
+                        f"Adjusted duration from {original_seconds}s to {duration_in_seconds}s "
+                        f"({duration}{duration_unit}) for {symbol} "
+                        f"(supported durations: {available_durations})",
                     )
 
                     # Update the strategy with the new duration
                     strategy["duration"] = duration
+                    strategy["duration_unit"] = duration_unit
 
                     # Notify the user about the duration adjustment
                     self._notify_status(
                         {
                             "status": "info",
-                            "message": f"Adjusted duration from {original_duration}s to {duration}s for {symbol}",
+                            "message": f"Adjusted duration from {original_seconds}s to {duration_in_seconds}s for {symbol}",
                         },
                     )
         except Exception as e:
@@ -384,7 +437,9 @@ class AutoTrader:
             # Get recent market data to determine optimal price
             try:
                 recent_candles = await self.client.get_candles(
-                    symbol, 60, count=10,
+                    symbol,
+                    60,
+                    count=10,
                 )  # Get recent 1-minute candles
                 if recent_candles and len(recent_candles) > 0:
                     # For CALL (buy), use a price slightly below current market price
@@ -450,6 +505,17 @@ class AutoTrader:
                 self._notify_status({"status": "error", "message": "No contract ID in response"})
                 return None
 
+            # Update risk manager with the active position
+            if self.risk_manager:
+                try:
+                    self.risk_manager.update_position(
+                        symbol=symbol,
+                        size=trade_amount,
+                        price=1.0,
+                    )
+                except Exception as e:
+                    logger.warning(f"Failed to update risk manager position: {e}")
+
             self._notify_status(
                 {
                     "status": "executed",
@@ -463,7 +529,7 @@ class AutoTrader:
             return contract_id
 
         except Exception as e:
-            error_msg = f"Exception during trade execution: {str(e)}"
+            error_msg = f"Exception during trade execution: {e!s}"
             logger.error(error_msg)
             self._notify_status({"status": "error", "message": error_msg})
             return None
@@ -485,7 +551,6 @@ class AutoTrader:
         retry_count = 0
         max_retries = 3
         update_count = 0
-        _start_time = datetime.datetime.now()  # noqa: F841 - kept for potential future use
         entry_price = None
         contract_type = None
         duration = None
@@ -509,13 +574,13 @@ class AutoTrader:
                     entry_price = contract_info.get("buy_price", 0)
                     contract_type = contract_info.get("contract_type", "")
                     duration = contract_info.get("date_expiry", 0) - contract_info.get(
-                        "date_start", 0,
+                        "date_start",
+                        0,
                     )
                     symbol = contract_info.get("underlying", "")
 
                 # Get current price and profit/loss
                 current_spot = contract_info.get("current_spot", 0)
-                _current_spot_time = contract_info.get("current_spot_time", 0)  # noqa: F841
                 entry_spot = contract_info.get("entry_spot", 0)
 
                 # Calculate profit/loss percentage
@@ -532,9 +597,7 @@ class AutoTrader:
                     expiry_time = contract_info.get("date_expiry", 0)
                     current_time = int(datetime.datetime.now().timestamp())
                     remaining_seconds = max(0, expiry_time - current_time)
-                    remaining_time = str(datetime.timedelta(seconds=remaining_seconds)).split(".")[
-                        0
-                    ]
+                    remaining_time = str(datetime.timedelta(seconds=remaining_seconds)).split(".")[0]
                 else:
                     remaining_time = "Unknown"
 
@@ -563,8 +626,31 @@ class AutoTrader:
 
                     # Update trade count
                     self.trade_count += 1
+                    trade_symbol = contract_info.get("underlying", self.current_symbol)
                     if profit > 0:
                         self.successful_trades += 1
+                        self.consecutive_losses = 0  # Reset global streak
+                        # Reset per-symbol streak
+                        if hasattr(self, "symbol_consecutive_losses"):
+                            self.symbol_consecutive_losses[trade_symbol] = 0
+                    else:
+                        self.consecutive_losses = getattr(self, "consecutive_losses", 0) + 1
+                        # Track per-symbol consecutive losses
+                        if hasattr(self, "symbol_consecutive_losses"):
+                            self.symbol_consecutive_losses[trade_symbol] = (
+                                self.symbol_consecutive_losses.get(trade_symbol, 0) + 1
+                            )
+                        # Apply per-symbol cooldown after a loss (30s base)
+                        if hasattr(self, "symbol_cooldowns"):
+                            sym_losses = self.symbol_consecutive_losses.get(trade_symbol, 1)
+                            cooldown_seconds = min(30 * sym_losses, 300)  # 30s, 60s, 90s... up to 5 min
+                            self.symbol_cooldowns[trade_symbol] = (
+                                datetime.datetime.now() + datetime.timedelta(seconds=cooldown_seconds)
+                            )
+                            logger.info(
+                                f"Applied {cooldown_seconds}s cooldown to {trade_symbol} after loss "
+                                f"({sym_losses} consecutive losses)"
+                            )
 
                     # Create trade result
                     trade_result = {
@@ -583,9 +669,7 @@ class AutoTrader:
                     if self.trade_count % 5 == 0:  # Every 5 trades
                         self.adjust_trade_size()
 
-                    result_message = (
-                        f"Trade completed: {'Profit' if profit >= 0 else 'Loss'} ${abs(profit):.2f}"
-                    )
+                    result_message = f"Trade completed: {'Profit' if profit >= 0 else 'Loss'} ${abs(profit):.2f}"
                     logger.info(result_message)
 
                     self._notify_status(
@@ -595,9 +679,7 @@ class AutoTrader:
                             "profit": profit,
                             "contract_info": contract_info,
                             "performance": {
-                                "win_rate": self.successful_trades / self.trade_count
-                                if self.trade_count > 0
-                                else 0,
+                                "win_rate": self.successful_trades / self.trade_count if self.trade_count > 0 else 0,
                                 "net_profit": self.daily_profit - self.daily_loss,
                             },
                         },
@@ -614,7 +696,7 @@ class AutoTrader:
 
                 # Notify UI of the error
                 self._notify_status(
-                    {"status": "error", "message": f"Error checking trade status: {str(e)}"},
+                    {"status": "error", "message": f"Error checking trade status: {e!s}"},
                 )
 
                 # Increment retry counter
@@ -631,7 +713,12 @@ class AutoTrader:
                 await asyncio.sleep(5)
 
     async def trading_cycle(
-        self, symbol, granularity, manual_price=None, use_ai_price=False, ai_managed_trading=False,
+        self,
+        symbol,
+        granularity,
+        manual_price=None,
+        use_ai_price=False,
+        ai_managed_trading=False,
     ):
         """
         Run a complete trading cycle: generate strategy, execute trade, monitor, and update.
@@ -648,26 +735,25 @@ class AutoTrader:
         self.current_granularity = granularity
 
         # Check trading conditions
-        if not self.check_trading_conditions():
+        if not self.check_trading_conditions(symbol):
             if self.trading_paused:
                 self._notify_status({"status": "paused", "message": self.pause_reason})
                 return False
 
             # If not paused but conditions failed, it might be time for model update
-            if self.last_model_training:
-                hours_since_training = (
-                    datetime.datetime.now() - self.last_model_training
-                ).total_seconds() / 3600
+            last_train = self.symbol_last_training.get(symbol)
+            if last_train:
+                hours_since_training = (datetime.datetime.now() - last_train).total_seconds() / 3600
                 config = get_config()
                 if hours_since_training > config.ai.model_update_frequency_hours:
-                    logger.info(f"Retraining model after {hours_since_training:.1f} hours...")
+                    logger.info(f"Retraining model for {symbol} after {hours_since_training:.1f} hours...")
                     success = await self.train_model(symbol, granularity)
                     if not success:
                         return False
 
         # Check if model needs initial training
-        if not self.last_model_training:
-            logger.info("No trained model found. Training new model...")
+        if not self.symbol_last_training.get(symbol):
+            logger.info(f"No trained model found for {symbol}. Training new model...")
             success = await self.train_model(symbol, granularity)
             if not success:
                 return False
@@ -678,6 +764,15 @@ class AutoTrader:
         if not strategy:
             return False
 
+        # Check if strategy was blocked by risk manager
+        if strategy.get("risk_blocked", False):
+            logger.warning(f"Trade blocked by risk manager: {strategy.get('risk_reason', 'unknown')}")
+            self._notify_status({
+                "status": "blocked",
+                "message": f"Trade blocked: {strategy.get('risk_reason', 'Risk limit reached')}",
+            })
+            return False
+
         # Check confidence threshold (use custom threshold if provided)
         config = get_config()
         threshold_to_use = (
@@ -685,23 +780,31 @@ class AutoTrader:
             if self.custom_confidence_threshold is not None
             else config.risk.confidence_threshold
         )
-        if strategy.get("confidence", 0) < threshold_to_use:
+        # Honor user-selected threshold directly
+        pass
+
+        strategy_confidence = strategy.get("confidence", 0)
+        if strategy_confidence < threshold_to_use:
             logger.info(
-                f"Strategy confidence too low: {strategy.get('confidence', 0):.2f} < {threshold_to_use}",
+                f"[{symbol}] Strategy confidence too low: {strategy_confidence:.2f} < {threshold_to_use:.2f} (skipping)",
             )
             self._notify_status(
                 {
                     "status": "skipped",
-                    "message": f"Strategy confidence too low: {strategy.get('confidence', 0):.2f}",
+                    "message": f"[{symbol}] Confidence too low: {strategy_confidence:.2f} < {threshold_to_use:.2f}",
                 },
             )
             return False
 
         # Determine trade amount and parameters
-        trade_amount = self.current_trade_amount
+        # Prioritize advanced risk manager's recommendation if available
+        if strategy and "recommended_amount" in strategy:
+            trade_amount = strategy["recommended_amount"]
+        else:
+            trade_amount = self.current_trade_amount
 
-        # If AI-managed trading is enabled, adjust trade parameters
-        if ai_managed_trading:
+        # If AI-managed trading is enabled and no risk manager recommendation exists, adjust trade parameters
+        if ai_managed_trading and not (strategy and "recommended_amount" in strategy):
             # Get market volatility and recent performance
             try:
                 # Analyze recent candles for volatility
@@ -713,13 +816,11 @@ class AutoTrader:
                     closes = [float(candle["close"]) for candle in recent_candles]
 
                     avg_price = sum(closes) / len(closes)
-                    price_ranges = [(h - low) / avg_price for h, low in zip(highs, lows)]
+                    price_ranges = [(h - low) / avg_price for h, low in zip(highs, lows, strict=False)]
                     volatility = sum(price_ranges) / len(price_ranges)
 
                     # Adjust trade amount based on volatility and win rate
-                    win_rate = (
-                        self.successful_trades / self.trade_count if self.trade_count > 0 else 0.5
-                    )
+                    win_rate = self.successful_trades / self.trade_count if self.trade_count > 0 else 0.5
 
                     # Higher volatility = smaller position size
                     volatility_factor = max(0.5, min(1.5, 1.0 / (volatility * 10)))
@@ -732,7 +833,8 @@ class AutoTrader:
 
                     # Apply limits and round to 2 decimal places
                     trade_amount = round(
-                        max(5.0, min(optimal_amount, self.base_trade_amount * 2)), 2,
+                        max(5.0, min(optimal_amount, self.base_trade_amount * 2)),
+                        2,
                     )
 
                     logger.info(
@@ -745,11 +847,13 @@ class AutoTrader:
                         # Adjust duration based on volatility
                         if volatility > 0.02:  # Very high volatility
                             strategy["duration"] = max(
-                                30, int(strategy["duration"] * 0.7),
+                                30,
+                                int(strategy["duration"] * 0.7),
                             )  # Shorter duration
                         elif volatility < 0.005:  # Low volatility
                             strategy["duration"] = min(
-                                300, int(strategy["duration"] * 1.3),
+                                300,
+                                int(strategy["duration"] * 1.3),
                             )  # Longer duration
 
                         logger.info(
@@ -764,41 +868,46 @@ class AutoTrader:
             strategy=strategy,
             amount=trade_amount,
             price=manual_price,
-            use_ai_price=use_ai_price
-            or ai_managed_trading,  # Enable AI price if either option is on
+            use_ai_price=use_ai_price or ai_managed_trading,  # Enable AI price if either option is on
         )
 
         if not contract_id:
             return False
 
-        # Monitor trade until completion
-        trade_result = await self.monitor_trade(contract_id)
-
-        if not trade_result:
-            return False
-
-        # Update strategy based on results using TradingAIv3 update method
-        self.trading_ai.update_from_trade_results([trade_result])
-
-        # Generate performance report every 10 trades
-        if self.trade_count % 10 == 0:
-            report = self.get_performance_report()
-            logger.info(
-                f"Performance report after {self.trade_count} trades: "
-                f"Win rate: {report['summary']['win_rate']:.2f}, "
-                f"Net profit: ${report['summary']['net_profit']:.2f}",
-            )
-
-            # Notify UI of performance report
-            self._notify_status(
-                {
-                    "status": "report",
-                    "message": f"Performance report after {self.trade_count} trades",
-                    "report": report,
-                },
-            )
+        # Start monitoring trade in background asynchronously to prevent blocking other symbols
+        task = asyncio.create_task(self.monitor_trade_background(contract_id, symbol))
+        self.background_tasks.add(task)
+        task.add_done_callback(self.background_tasks.discard)
 
         return True
+
+    async def monitor_trade_background(self, contract_id, symbol):
+        """Monitor trade in background and update the symbol-specific model on completion."""
+        try:
+            trade_result = await self.monitor_trade(contract_id)
+            if trade_result:
+                model = self.get_model_for_symbol(symbol)
+                model.update_from_trade_results([trade_result])
+
+                # Generate performance report every 10 trades
+                if self.trade_count % 10 == 0:
+                    report = self.get_performance_report()
+                    logger.info(
+                        f"Performance report after {self.trade_count} trades: "
+                        f"Win rate: {report['summary']['win_rate']:.2f}, "
+                        f"Net profit: ${report['summary']['net_profit']:.2f}",
+                    )
+
+                    # Notify UI of performance report
+                    self._notify_status(
+                        {
+                            "status": "report",
+                            "message": f"Performance report after {self.trade_count} trades",
+                            "report": report,
+                        },
+                    )
+        except Exception as e:
+            logger.error(f"Error monitoring trade {contract_id} in background: {e}")
 
     async def run_trading_loop(
         self,
@@ -813,7 +922,7 @@ class AutoTrader:
         Run the trading loop continuously.
 
         Args:
-            symbol: Market symbol to trade
+            symbol: Market symbol(s) to trade (can be str, list, or comma-separated str)
             granularity: Timeframe granularity in seconds
             manual_price: Optional manual price setting
             use_ai_price: Whether to use AI for price management
@@ -823,6 +932,20 @@ class AutoTrader:
         self.is_running = True
         self.trading_paused = False
         self.pause_reason = None
+
+        # Handle single or multiple symbols
+        if isinstance(symbol, str):
+            if "," in symbol:
+                self.symbols = [s.strip() for s in symbol.split(",") if s.strip()]
+            else:
+                self.symbols = [symbol]
+        elif isinstance(symbol, (list, tuple)):
+            self.symbols = list(symbol)
+        else:
+            self.symbols = ["R_75"]
+
+        self.current_symbol = self.symbols[0] if self.symbols else None
+        self.current_granularity = granularity
 
         # Store trading settings
         self.manual_price = manual_price
@@ -837,6 +960,9 @@ class AutoTrader:
         self.peak_balance = 0.0
         self.current_balance = 0.0
         self.max_drawdown = 0.0
+        self.consecutive_losses = 0
+        self.symbol_cooldowns: dict[str, datetime.datetime] = {}
+        self.symbol_consecutive_losses: dict[str, int] = {}
 
         # Reset trade size to base amount
         self.current_trade_amount = self.base_trade_amount
@@ -857,7 +983,7 @@ class AutoTrader:
         self._notify_status(
             {
                 "status": "started",
-                "message": f"Auto-trading started for {symbol} with {granularity}s granularity",
+                "message": f"Auto-trading started for {', '.join(self.symbols)} with {granularity}s granularity",
                 "settings": {
                     "trade_amount": self.current_trade_amount,
                     "max_daily_loss": config.risk.max_daily_loss,
@@ -870,14 +996,22 @@ class AutoTrader:
             },
         )
 
+        # Start WebSocket server
+        self.ws_server = DARTWebSocketServer(port=8765)
+        await self.ws_server.start()
+
         # Reset day change time
         day_change_time = datetime.datetime.now().replace(
-            hour=0, minute=0, second=0, microsecond=0,
+            hour=0,
+            minute=0,
+            second=0,
+            microsecond=0,
         ) + datetime.timedelta(days=1)
 
-        # Initialize performance tracking for this market
-        if symbol not in self.performance_by_market:
-            self.performance_by_market[symbol] = {"trades": 0, "wins": 0, "profit": 0, "loss": 0}
+        # Initialize performance tracking for each symbol
+        for sym in self.symbols:
+            if sym not in self.performance_by_market:
+                self.performance_by_market[sym] = {"trades": 0, "wins": 0, "profit": 0, "loss": 0}
 
         while self.is_running:
             try:
@@ -891,9 +1025,7 @@ class AutoTrader:
                         "date": day_change_time.strftime("%Y-%m-%d"),
                         "trades": self.trade_count,
                         "wins": self.successful_trades,
-                        "win_rate": self.successful_trades / self.trade_count
-                        if self.trade_count > 0
-                        else 0,
+                        "win_rate": self.successful_trades / self.trade_count if self.trade_count > 0 else 0,
                         "profit": self.daily_profit,
                         "loss": self.daily_loss,
                         "net": self.daily_profit - self.daily_loss,
@@ -919,7 +1051,10 @@ class AutoTrader:
 
                     # Update day change time
                     day_change_time = now.replace(
-                        hour=0, minute=0, second=0, microsecond=0,
+                        hour=0,
+                        minute=0,
+                        second=0,
+                        microsecond=0,
                     ) + datetime.timedelta(days=1)
 
                 # Check if trading is paused
@@ -929,32 +1064,132 @@ class AutoTrader:
                     await asyncio.sleep(60)  # Check again in a minute
                     continue
 
-                # Run a trading cycle
-                cycle_success = await self.trading_cycle(
-                    symbol=symbol,
-                    granularity=granularity,
-                    manual_price=self.manual_price,
-                    use_ai_price=self.use_ai_price,
-                    ai_managed_trading=self.ai_managed_trading,
-                )
+                # --- RISK CONTROL: Limit max simultaneous trades ---
+                # Count currently active/open trades
+                active_trade_count = len([
+                    t for t in self.client.active_trades.values()
+                    if t.get("status") == "open"
+                ])
+                config = get_config()
+                max_simultaneous = min(5, len(self.symbols))  # Max 5 concurrent trades
 
-                # Determine wait time based on cycle success and market conditions
-                if cycle_success:
-                    # Successful cycle, wait standard time
-                    wait_time = 30
+                if active_trade_count >= max_simultaneous:
+                    logger.info(
+                        f"Max simultaneous trades reached ({active_trade_count}/{max_simultaneous}). "
+                        f"Waiting for existing trades to close..."
+                    )
+                    await asyncio.sleep(10)
+                    continue
+
+                # --- RISK CONTROL: Consecutive loss streak breaker ---
+                if self.consecutive_losses >= 5:
+                    logger.warning(
+                        f"Consecutive loss streak: {self.consecutive_losses} losses in a row. "
+                        f"Pausing for 2 minutes to let market stabilize..."
+                    )
+                    self._notify_status({
+                        "status": "warning",
+                        "message": f"Loss streak breaker: {self.consecutive_losses} consecutive losses. Pausing 2 min.",
+                    })
+                    await asyncio.sleep(120)
+                    self.consecutive_losses = 0  # Reset after cooldown
+                    continue
+
+                # --- RISK CONTROL: Adaptive position sizing ---
+                # Reduce stake size after losses, increase after wins
+                if self.trade_count > 0:
+                    recent_win_rate = self.successful_trades / self.trade_count
+                    if recent_win_rate < 0.4 and self.trade_count >= 5:
+                        # Poor performance: reduce stake to 50% of base
+                        self.current_trade_amount = max(1.0, self.base_trade_amount * 0.5)
+                        logger.info(f"Adaptive sizing: Reduced trade amount to ${self.current_trade_amount:.2f} (win rate: {recent_win_rate:.1%})")
+                    elif recent_win_rate > 0.65 and self.trade_count >= 10:
+                        # Good performance: cautiously increase to 120% of base
+                        self.current_trade_amount = min(self.base_trade_amount * 1.2, self.base_trade_amount * 2)
+                        logger.info(f"Adaptive sizing: Increased trade amount to ${self.current_trade_amount:.2f} (win rate: {recent_win_rate:.1%})")
+                    else:
+                        self.current_trade_amount = self.base_trade_amount
+
+                # Run trading cycles concurrently for all symbols
+                async def run_cycle_for_symbol(sym: str) -> bool:
+                    # Avoid opening duplicate trades for the same symbol
+                    has_active = any(
+                        t.get("symbol") == sym and t.get("status") == "open" for t in self.client.active_trades.values()
+                    )
+                    if has_active:
+                        logger.debug(f"Symbol {sym} already has an active trade. Skipping.")
+                        return False
+
+                    # --- RISK CONTROL: Per-symbol cooldown after loss ---
+                    cooldown_until = self.symbol_cooldowns.get(sym)
+                    if cooldown_until and datetime.datetime.now() < cooldown_until:
+                        remaining = (cooldown_until - datetime.datetime.now()).total_seconds()
+                        logger.debug(f"Symbol {sym} is in cooldown for {remaining:.0f}s more. Skipping.")
+                        return False
+
+                    # --- RISK CONTROL: Skip symbols with high consecutive losses ---
+                    sym_losses = self.symbol_consecutive_losses.get(sym, 0)
+                    if sym_losses >= 3:
+                        cooldown_minutes = min(sym_losses * 2, 30)  # 6 min, 8 min, ... up to 30 min
+                        self.symbol_cooldowns[sym] = datetime.datetime.now() + datetime.timedelta(minutes=cooldown_minutes)
+                        self.symbol_consecutive_losses[sym] = 0  # Reset after cooldown
+                        logger.info(f"Symbol {sym} had {sym_losses} consecutive losses. Cooldown for {cooldown_minutes} min.")
+                        return False
+
+                    # Run trade cycle for this symbol
+                    return await self.trading_cycle(
+                        symbol=sym,
+                        granularity=granularity,
+                        manual_price=self.manual_price,
+                        use_ai_price=self.use_ai_price,
+                        ai_managed_trading=self.ai_managed_trading,
+                    )
+
+                # Only trade a subset of symbols per cycle (rotate through them)
+                # This prevents firing 30 trades simultaneously
+                available_symbols = [
+                    sym for sym in self.symbols
+                    if not any(
+                        t.get("symbol") == sym and t.get("status") == "open"
+                        for t in self.client.active_trades.values()
+                    )
+                    and not (self.symbol_cooldowns.get(sym) and datetime.datetime.now() < self.symbol_cooldowns.get(sym))
+                    and self.symbol_consecutive_losses.get(sym, 0) < 3
+                ]
+
+                # Limit to max_simultaneous - active_trade_count new trades per cycle
+                slots_available = max_simultaneous - active_trade_count
+                symbols_this_cycle = available_symbols[:slots_available]
+
+                if not symbols_this_cycle:
+                    logger.debug("No available symbols to trade this cycle.")
+                    await asyncio.sleep(15)
+                    continue
+
+                tasks = [run_cycle_for_symbol(sym) for sym in symbols_this_cycle]
+                results = await asyncio.gather(*tasks, return_exceptions=True)
+
+                any_cycle_success = False
+                for sym, res in zip(symbols_this_cycle, results, strict=True):
+                    if isinstance(res, Exception):
+                        logger.error(f"Error in concurrent trading cycle for {sym}: {res}", exc_info=res)
+                    elif res is True:
+                        any_cycle_success = True
+
+                # Determine wait time based on cycle success
+                if any_cycle_success:
+                    wait_time = 20  # Slightly longer to avoid rapid-fire
                 elif self.trading_paused:
-                    # Trading paused, wait longer
                     wait_time = 60
                 else:
-                    # Unsuccessful cycle but not paused, wait medium time
-                    wait_time = 45
+                    wait_time = 30
 
                 # Wait before the next cycle
                 await asyncio.sleep(wait_time)
 
             except Exception as e:
                 logger.error(f"Error in trading loop: {e}")
-                self._notify_status({"status": "error", "message": f"Trading error: {str(e)}"})
+                self._notify_status({"status": "error", "message": f"Trading error: {e!s}"})
                 await asyncio.sleep(60)  # Wait longer after an error
 
         # Generate final performance report
@@ -969,6 +1204,11 @@ class AutoTrader:
             f"Net profit: ${final_report['summary']['net_profit']:.2f}",
         )
 
+        # Stop the WebSocket server
+        if self.ws_server:
+            await self.ws_server.stop()
+            self.ws_server = None
+
     def start_trading(
         self,
         symbol,
@@ -977,17 +1217,12 @@ class AutoTrader:
         use_ai_price=False,
         ai_managed_trading=False,
         confidence_threshold=None,
+        loop=None,
     ):
         """
-        Start the auto-trading process in a separate thread.
+        Start the auto-trading process.
 
-        Args:
-            symbol: Market symbol to trade
-            granularity: Timeframe granularity in seconds
-            manual_price: Optional manual price setting
-            use_ai_price: Whether to use AI for price management
-            ai_managed_trading: Whether to let AI fully manage trading strategy
-            confidence_threshold: Custom confidence threshold (overrides settings.CONFIDENCE_THRESHOLD)
+        If loop is provided, runs on that event loop directly. Otherwise, starts in a separate thread.
         """
         # If AI-managed trading is enabled, also enable AI price management
         if ai_managed_trading:
@@ -995,6 +1230,22 @@ class AutoTrader:
         if self.is_running:
             logger.warning("Trading is already running")
             return False
+
+        if loop is not None:
+            self.loop = loop
+            self.trading_thread = None
+            asyncio.run_coroutine_threadsafe(
+                self.run_trading_loop(
+                    symbol,
+                    granularity,
+                    manual_price,
+                    use_ai_price,
+                    ai_managed_trading,
+                    confidence_threshold,
+                ),
+                loop,
+            )
+            return True
 
         # Create a new event loop for the trading thread
         self.loop = asyncio.new_event_loop()
@@ -1073,13 +1324,9 @@ class AutoTrader:
             "net_profit": self.daily_profit - self.daily_loss,
             "max_drawdown": self.max_drawdown,
             "current_trade_amount": self.current_trade_amount,
-            "last_model_training": self.last_model_training.isoformat()
-            if self.last_model_training
-            else None,
+            "last_model_training": self.last_model_training.isoformat() if self.last_model_training else None,
             "model_metrics": self.trading_ai.performance_metrics if self.trading_ai else None,
-            "session_duration": str(datetime.datetime.now() - self.session_start_time).split(".")[
-                0
-            ],
+            "session_duration": str(datetime.datetime.now() - self.session_start_time).split(".")[0],
         }
 
     def update_performance_metrics(self, trade_result):
@@ -1129,6 +1376,28 @@ class AutoTrader:
             self.daily_loss += abs(profit)
             self.current_balance -= abs(profit)
 
+        # Update risk manager if available
+        if self.risk_manager:
+            try:
+                entry_spot = float(contract_info.get("entry_spot") or 0.0)
+                exit_spot = float(contract_info.get("current_spot") or 0.0)
+                benchmark_return = (exit_spot - entry_spot) / entry_spot if entry_spot > 0 else 0.0
+
+                # Trade return is profit / buy_price
+                buy_price = float(contract_info.get("buy_price") or 0.0)
+                trade_return = profit / buy_price if buy_price > 0 else 0.0
+
+                # Close the position by passing size=0.0 to update_position
+                self.risk_manager.update_position(
+                    symbol=symbol,
+                    size=0.0,
+                    price=exit_spot,
+                    trade_return=trade_return,
+                    benchmark_return=benchmark_return,
+                )
+            except Exception as e:
+                logger.warning(f"Failed to update risk manager position: {e}")
+
         # Update peak balance and max drawdown
         if self.current_balance > self.peak_balance:
             self.peak_balance = self.current_balance
@@ -1143,7 +1412,8 @@ class AutoTrader:
     def log_trade(self, trade_record):
         """Log trade details to a file."""
         log_file = os.path.join(
-            self.logs_dir, f"trades_{datetime.datetime.now().strftime('%Y%m%d')}.json",
+            self.logs_dir,
+            f"trades_{datetime.datetime.now().strftime('%Y%m%d')}.json",
         )
 
         try:
@@ -1195,7 +1465,7 @@ class AutoTrader:
             f"Trade size adjusted: ${self.current_trade_amount} (multiplier: {self.trade_size_multiplier:.2f})",
         )
 
-    def check_trading_conditions(self):
+    def check_trading_conditions(self, symbol=None):
         """Check if trading should continue or be paused based on performance and risk metrics."""
         # Check daily loss limit
         config = get_config()
@@ -1224,13 +1494,12 @@ class AutoTrader:
                 return False
 
         # Check if model needs retraining
-        if self.last_model_training:
-            hours_since_training = (
-                datetime.datetime.now() - self.last_model_training
-            ).total_seconds() / 3600
+        last_train = self.symbol_last_training.get(symbol) if symbol else self.last_model_training
+        if last_train:
+            hours_since_training = (datetime.datetime.now() - last_train).total_seconds() / 3600
             if hours_since_training > config.ai.model_update_frequency_hours:
                 logger.info(
-                    f"Model update needed: {hours_since_training:.1f} hours since last training",
+                    f"Model update needed for {symbol or 'global'}: {hours_since_training:.1f} hours since last training",
                 )
                 return False
 
@@ -1279,16 +1548,12 @@ class AutoTrader:
             "hourly_performance": {
                 "best_hour": {
                     "hour": best_hour[0],
-                    "win_rate": best_hour[1]["wins"] / best_hour[1]["trades"]
-                    if best_hour[1]["trades"] > 0
-                    else 0,
+                    "win_rate": best_hour[1]["wins"] / best_hour[1]["trades"] if best_hour[1]["trades"] > 0 else 0,
                     "trades": best_hour[1]["trades"],
                 },
                 "worst_hour": {
                     "hour": worst_hour[0],
-                    "win_rate": worst_hour[1]["wins"] / worst_hour[1]["trades"]
-                    if worst_hour[1]["trades"] > 0
-                    else 0,
+                    "win_rate": worst_hour[1]["wins"] / worst_hour[1]["trades"] if worst_hour[1]["trades"] > 0 else 0,
                     "trades": worst_hour[1]["trades"],
                 },
             },
@@ -1298,9 +1563,7 @@ class AutoTrader:
         if best_market:
             report["market_performance"]["best_market"] = {
                 "symbol": best_market[0],
-                "win_rate": best_market[1]["wins"] / best_market[1]["trades"]
-                if best_market[1]["trades"] > 0
-                else 0,
+                "win_rate": best_market[1]["wins"] / best_market[1]["trades"] if best_market[1]["trades"] > 0 else 0,
                 "trades": best_market[1]["trades"],
                 "net_profit": best_market[1]["profit"] - best_market[1]["loss"],
             }
@@ -1308,9 +1571,7 @@ class AutoTrader:
         if worst_market:
             report["market_performance"]["worst_market"] = {
                 "symbol": worst_market[0],
-                "win_rate": worst_market[1]["wins"] / worst_market[1]["trades"]
-                if worst_market[1]["trades"] > 0
-                else 0,
+                "win_rate": worst_market[1]["wins"] / worst_market[1]["trades"] if worst_market[1]["trades"] > 0 else 0,
                 "trades": worst_market[1]["trades"],
                 "net_profit": worst_market[1]["profit"] - worst_market[1]["loss"],
             }

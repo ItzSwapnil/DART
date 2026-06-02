@@ -2,28 +2,30 @@
 DART UI Theme System - Centralized styling for the Tkinter interface.
 Provides colors, typography, spacing, and custom style definitions.
 """
+
 from tkinter import ttk
 
 # =============================================================================
 # COLOR PALETTE
 # =============================================================================
 
+
 class Colors:
     """Color definitions for DART UI."""
 
     # Primary colors
-    PRIMARY = "#6366F1"       # Indigo - main accent
+    PRIMARY = "#6366F1"  # Indigo - main accent
     PRIMARY_DARK = "#4F46E5"  # Darker indigo
-    PRIMARY_LIGHT = "#818CF8" # Lighter indigo
+    PRIMARY_LIGHT = "#818CF8"  # Lighter indigo
 
     # Status colors
-    SUCCESS = "#10B981"       # Emerald green
+    SUCCESS = "#10B981"  # Emerald green
     SUCCESS_LIGHT = "#34D399"
-    ERROR = "#EF4444"         # Red
+    ERROR = "#EF4444"  # Red
     ERROR_LIGHT = "#F87171"
-    WARNING = "#F59E0B"       # Amber
+    WARNING = "#F59E0B"  # Amber
     WARNING_LIGHT = "#FBBF24"
-    INFO = "#3B82F6"          # Blue
+    INFO = "#3B82F6"  # Blue
     INFO_LIGHT = "#60A5FA"
 
     # Neutral colors
@@ -31,12 +33,12 @@ class Colors:
     BLACK = "#000000"
 
     # Dark theme
-    DARK_BG = "#1A1B26"           # Main background
-    DARK_BG_SECONDARY = "#24283B" # Card/panel background
+    DARK_BG = "#1A1B26"  # Main background
+    DARK_BG_SECONDARY = "#24283B"  # Card/panel background
     DARK_BG_TERTIARY = "#2F3549"  # Hover/active states
-    DARK_BORDER = "#414868"       # Borders
-    DARK_TEXT = "#C0CAF5"         # Primary text
-    DARK_TEXT_MUTED = "#565F89"   # Secondary text
+    DARK_BORDER = "#414868"  # Borders
+    DARK_TEXT = "#C0CAF5"  # Primary text
+    DARK_TEXT_MUTED = "#565F89"  # Secondary text
 
     # Light theme
     LIGHT_BG = "#F8FAFC"
@@ -47,14 +49,15 @@ class Colors:
     LIGHT_TEXT_MUTED = "#64748B"
 
     # Trading colors
-    PROFIT = "#10B981"    # Green for gains
-    LOSS = "#EF4444"      # Red for losses
-    NEUTRAL = "#6B7280"   # Gray for neutral
+    PROFIT = "#10B981"  # Green for gains
+    LOSS = "#EF4444"  # Red for losses
+    NEUTRAL = "#6B7280"  # Gray for neutral
 
 
 # =============================================================================
 # TYPOGRAPHY
 # =============================================================================
+
 
 class Fonts:
     """Font definitions for DART UI."""
@@ -92,6 +95,7 @@ class Fonts:
 # SPACING
 # =============================================================================
 
+
 class Spacing:
     """Spacing constants for consistent layout."""
 
@@ -111,6 +115,7 @@ class Spacing:
 # =============================================================================
 # STYLE CONFIGURATION
 # =============================================================================
+
 
 def configure_styles(root, theme="dark"):
     """

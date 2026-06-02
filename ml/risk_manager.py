@@ -10,14 +10,9 @@ import logging
 import os
 from dataclasses import dataclass
 from enum import Enum
-from typing import Dict, List, Tuple
 
 import numpy as np
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-)
 logger = logging.getLogger("risk_management")
 
 
@@ -82,12 +77,14 @@ class AdvancedRiskManager:
         self,
         initial_capital=10000,
         max_portfolio_risk=0.02,
-        var_confidence_levels=[0.95, 0.99],
+        var_confidence_levels=None,
         lookback_period=252,
     ):
         self.initial_capital = initial_capital
         self.current_capital = initial_capital
         self.max_portfolio_risk = max_portfolio_risk
+        if var_confidence_levels is None:
+            var_confidence_levels = [0.95, 0.99]
         self.var_confidence_levels = var_confidence_levels
         self.lookback_period = lookback_period
 
@@ -97,6 +94,7 @@ class AdvancedRiskManager:
         self.daily_pnl = []
         self.drawdown_history = []
         self.exposure_history = []
+        self.benchmark_returns = []
 
         # Position tracking
         self.current_positions = {}
@@ -143,7 +141,7 @@ class AdvancedRiskManager:
 
         logger.info("DART v2.0 AdvancedRiskManager initialized")
 
-    def _initialize_stress_scenarios(self) -> Dict:
+    def _initialize_stress_scenarios(self) -> dict:
         """Initialize stress test scenarios."""
         return {
             "market_crash": {"market_decline": -0.20, "volatility_spike": 3.0},
@@ -162,7 +160,7 @@ class AdvancedRiskManager:
         expected_volatility: float,
         symbol: str,
         current_price: float,
-    ) -> Dict:
+    ) -> dict:
         """
         Calculate optimal position size using multiple methodologies.
 
@@ -180,12 +178,17 @@ class AdvancedRiskManager:
 
         # Base position size calculation
         base_position = self._calculate_base_position_size(
-            signal_strength, confidence, expected_return, expected_volatility,
+            signal_strength,
+            confidence,
+            expected_return,
+            expected_volatility,
         )
 
         # Kelly criterion adjustment
         kelly_position = self._calculate_kelly_position(
-            expected_return, expected_volatility, symbol,
+            expected_return,
+            expected_volatility,
+            symbol,
         )
 
         # Risk parity adjustment
@@ -193,7 +196,8 @@ class AdvancedRiskManager:
 
         # Volatility targeting
         vol_target_position = self._calculate_volatility_targeted_position(
-            expected_volatility, signal_strength,
+            expected_volatility,
+            signal_strength,
         )
 
         # Combine methodologies with weights
@@ -216,7 +220,7 @@ class AdvancedRiskManager:
             "risk_parity_size": risk_parity_position,
             "vol_target_size": vol_target_position,
             "risk_utilization": abs(final_position) / self.position_limits.max_position_size,
-            "capital_allocation": final_position * current_price,
+            "capital_allocation": final_position * self.current_capital,
             "max_loss": self._calculate_max_loss(final_position, current_price),
         }
 
@@ -237,7 +241,7 @@ class AdvancedRiskManager:
 
         # Adjust for expected risk-return profile
         if expected_volatility > 0:
-            risk_adjusted_size = base_size * (expected_return / expected_volatility)
+            risk_adjusted_size = base_size * (abs(expected_return) / expected_volatility)
         else:
             risk_adjusted_size = base_size
 
@@ -246,14 +250,15 @@ class AdvancedRiskManager:
         return np.clip(risk_adjusted_size, -max_position, max_position)
 
     def _calculate_kelly_position(
-        self, expected_return: float, expected_volatility: float, symbol: str,
+        self,
+        expected_return: float,
+        expected_volatility: float,
+        symbol: str,
     ) -> float:
         """Calculate position size using Kelly criterion."""
 
         # Get historical performance for this symbol
-        recent_trades = [
-            t for t in self.trade_history[-self.kelly_lookback :] if t.get("symbol") == symbol
-        ]
+        recent_trades = [t for t in self.trade_history[-self.kelly_lookback :] if t.get("symbol") == symbol]
 
         if len(recent_trades) < 10:
             return 0.0  # Insufficient data
@@ -266,14 +271,14 @@ class AdvancedRiskManager:
             return 0.0
 
         win_rate = len(wins) / len(recent_trades)
-        avg_win = np.mean(wins)
-        avg_loss = np.mean(losses)
+        avg_win = float(np.mean(wins))
+        avg_loss = float(np.mean(losses))
 
         # Kelly formula: f = (bp - q) / b
         # where b = avg_win/avg_loss, p = win_rate, q = 1 - win_rate
         if avg_loss > 0:
             b = avg_win / avg_loss
-            kelly_fraction = (b * win_rate - (1 - win_rate)) / b
+            kelly_fraction = float((b * win_rate - (1 - win_rate)) / b)
         else:
             kelly_fraction = 0.0
 
@@ -297,10 +302,7 @@ class AdvancedRiskManager:
         target_risk_contribution = self.max_portfolio_risk / max(len(self.current_positions) + 1, 1)
 
         # Position size = target_risk / volatility
-        if expected_volatility > 0:
-            risk_parity_size = target_risk_contribution / expected_volatility
-        else:
-            risk_parity_size = 0.0
+        risk_parity_size = target_risk_contribution / expected_volatility if expected_volatility > 0 else 0.0
 
         return np.clip(
             risk_parity_size,
@@ -309,7 +311,9 @@ class AdvancedRiskManager:
         )
 
     def _calculate_volatility_targeted_position(
-        self, expected_volatility: float, signal_strength: float,
+        self,
+        expected_volatility: float,
+        signal_strength: float,
     ) -> float:
         """Calculate position size targeting specific volatility level."""
 
@@ -328,24 +332,25 @@ class AdvancedRiskManager:
         )
 
     def _apply_risk_constraints(
-        self, position_size: float, symbol: str, current_price: float,
+        self,
+        position_size: float,
+        symbol: str,
+        current_price: float,
     ) -> float:
         """Apply risk constraints and limits to position size."""
 
-        # Check maximum single trade risk
-        max_trade_value = self.current_capital * self.position_limits.max_single_trade_risk
-        max_shares = max_trade_value / current_price
-        position_size = np.clip(position_size, -max_shares, max_shares)
+        # For fixed-stake contracts (binary options), position_size represents a fraction of capital.
+        # Check maximum single trade risk directly on the capital fraction.
+        max_trade_risk = self.position_limits.max_single_trade_risk
+        position_size = np.clip(position_size, -max_trade_risk, max_trade_risk)
 
-        # Check portfolio exposure limits
-        total_exposure = sum(
-            abs(pos["size"] * pos["price"]) for pos in self.current_positions.values()
-        )
-        new_exposure = abs(position_size * current_price)
-        max_portfolio_value = self.current_capital * self.position_limits.max_portfolio_exposure
+        # Check portfolio exposure limits based on capital fractions
+        total_exposure_ratio = sum(abs(pos["size"]) for pos in self.current_positions.values()) / self.current_capital
+        new_exposure_ratio = abs(position_size)
+        max_portfolio_exposure = self.position_limits.max_portfolio_exposure
 
-        if total_exposure + new_exposure > max_portfolio_value:
-            adjustment_factor = (max_portfolio_value - total_exposure) / new_exposure
+        if total_exposure_ratio + new_exposure_ratio > max_portfolio_exposure:
+            adjustment_factor = (max_portfolio_exposure - total_exposure_ratio) / new_exposure_ratio
             position_size *= max(0, adjustment_factor)
 
         # Check correlation limits
@@ -363,10 +368,7 @@ class AdvancedRiskManager:
         # Calculate correlation-weighted exposure
         corr_weighted_exposure = 0
         for existing_symbol, position in self.current_positions.items():
-            if (
-                existing_symbol in self.correlation_matrix.columns
-                and symbol in self.correlation_matrix.index
-            ):
+            if existing_symbol in self.correlation_matrix.columns and symbol in self.correlation_matrix.index:
                 correlation = abs(self.correlation_matrix.loc[symbol, existing_symbol])
                 if correlation > 0.7:  # High correlation threshold
                     corr_weighted_exposure += abs(position["size"]) * correlation
@@ -395,25 +397,8 @@ class AdvancedRiskManager:
 
     def _calculate_max_loss(self, position_size: float, current_price: float) -> float:
         """Calculate maximum potential loss for the position."""
-        position_value = abs(position_size * current_price)
-
-        # Assume maximum loss scenarios
-        max_loss_scenarios = {
-            "normal": 0.05,  # 5% loss
-            "volatile": 0.15,  # 15% loss
-            "crisis": 0.30,  # 30% loss
-        }
-
-        scenario_prob = {"normal": 0.8, "volatile": 0.15, "crisis": 0.05}
-
-        expected_max_loss = sum(
-            position_value * loss * prob
-            for (scenario, loss), (_, prob) in zip(
-                max_loss_scenarios.items(), scenario_prob.items(),
-            )
-        )
-
-        return expected_max_loss
+        # For options, maximum potential loss is the entire stake amount
+        return abs(position_size * self.current_capital)
 
     def calculate_portfolio_risk_metrics(self) -> RiskMetrics:
         """Calculate comprehensive portfolio risk metrics with Monte Carlo VaR."""
@@ -445,45 +430,52 @@ class AdvancedRiskManager:
         hist_var_99 = np.percentile(returns, 1)
 
         # Use more conservative of MC or Historical VaR
-        var_95 = min(mc_var_95, hist_var_95)
-        var_99 = min(mc_var_99, hist_var_99)
+        var_95 = float(min(mc_var_95, hist_var_95))
+        var_99 = float(min(mc_var_99, hist_var_99))
 
         # Conditional VaR (Expected Shortfall) - v2.0 enhanced
-        cvar_95 = self._calculate_expected_shortfall(returns, 0.95)
-        cvar_99 = self._calculate_expected_shortfall(returns, 0.99)
+        cvar_95 = float(self._calculate_expected_shortfall(returns, 0.95))
+        cvar_99 = float(self._calculate_expected_shortfall(returns, 0.99))
 
         # Maximum Drawdown
         cumulative_returns = np.cumprod(1 + returns)
         running_max = np.maximum.accumulate(cumulative_returns)
         drawdowns = (cumulative_returns - running_max) / running_max
-        max_drawdown = np.min(drawdowns)
+        max_drawdown: float = float(np.min(drawdowns))
 
         # Performance ratios
         mean_return = np.mean(returns)
-        volatility = np.std(returns)
+        volatility = float(np.std(returns))
 
         # Sharpe ratio (assuming risk-free rate of 0.02/252 daily)
         risk_free_rate = 0.02 / 252
-        sharpe_ratio = (mean_return - risk_free_rate) / volatility if volatility > 0 else 0
+        sharpe_ratio = float((mean_return - risk_free_rate) / volatility if volatility > 0 else 0.0)
 
         # Sortino ratio (downside deviation)
         downside_returns = returns[returns < risk_free_rate]
         downside_deviation = np.std(downside_returns) if len(downside_returns) > 0 else volatility
-        sortino_ratio = (
-            (mean_return - risk_free_rate) / downside_deviation if downside_deviation > 0 else 0
-        )
+        sortino_ratio = float((mean_return - risk_free_rate) / downside_deviation if downside_deviation > 0 else 0.0)
 
         # Calmar ratio
         annualized_return = mean_return * 252
-        calmar_ratio = annualized_return / abs(max_drawdown) if max_drawdown < 0 else 0
+        calmar_ratio = float(annualized_return / abs(max_drawdown) if max_drawdown < 0 else 0.0)
 
         # Beta and Alpha (against market benchmark)
-        beta = 1.0  # Placeholder
-        alpha = annualized_return - (risk_free_rate * 252 + beta * 0.08)
+        beta = 1.0  # Fallback
+        if len(self.portfolio_returns) >= 5 and len(self.benchmark_returns) == len(self.portfolio_returns):
+            p_returns = np.array(self.portfolio_returns[-self.lookback_period :])
+            b_returns = np.array(self.benchmark_returns[-self.lookback_period :])
+            b_variance = np.var(b_returns)
+            if b_variance > 1e-8:
+                covariance = np.cov(p_returns, b_returns)[0, 1]
+                beta = float(covariance / b_variance)
+
+        benchmark_mean = np.mean(self.benchmark_returns) if self.benchmark_returns else 0.0003  # ~8% annualized
+        alpha = float(annualized_return - (risk_free_rate * 252 + beta * (benchmark_mean * 252)))
 
         # Information ratio and tracking error
         tracking_error = volatility
-        information_ratio = alpha / tracking_error if tracking_error > 0 else 0
+        information_ratio = float(alpha / tracking_error if tracking_error > 0 else 0.0)
 
         return RiskMetrics(
             value_at_risk_95=var_95,
@@ -501,7 +493,7 @@ class AdvancedRiskManager:
             tracking_error=tracking_error,
         )
 
-    def _calculate_monte_carlo_var(self, returns: np.ndarray) -> Tuple[float, float]:
+    def _calculate_monte_carlo_var(self, returns: np.ndarray) -> tuple[float, float]:
         """Calculate Value at Risk using Monte Carlo simulation - v2.0 feature."""
 
         mean_return = np.mean(returns)
@@ -509,7 +501,9 @@ class AdvancedRiskManager:
 
         # Simulate future returns using GBM-like process
         simulated_returns = np.random.normal(
-            mean_return, volatility, (self.mc_simulations, self.mc_horizon),
+            mean_return,
+            volatility,
+            (self.mc_simulations, self.mc_horizon),
         )
 
         # Calculate cumulative returns for each simulation
@@ -548,7 +542,7 @@ class AdvancedRiskManager:
         else:
             logger.warning(f"Unknown regime: {regime}, keeping current: {self.current_regime}")
 
-    def circuit_breaker_check(self) -> Dict:
+    def circuit_breaker_check(self) -> dict:
         """Check if circuit breakers should be triggered - v2.0 feature."""
 
         alerts = []
@@ -592,7 +586,7 @@ class AdvancedRiskManager:
             "timestamp": datetime.datetime.now().isoformat(),
         }
 
-    def run_stress_tests(self) -> Dict:
+    def run_stress_tests(self) -> dict:
         """Run stress tests on current portfolio."""
 
         stress_results = {}
@@ -600,7 +594,7 @@ class AdvancedRiskManager:
         for scenario_name, scenario_params in self.stress_test_scenarios.items():
             portfolio_impact = 0
 
-            for symbol, position in self.current_positions.items():
+            for _symbol, position in self.current_positions.items():
                 position_value = position["size"] * position["price"]
 
                 # Apply scenario-specific shocks
@@ -639,14 +633,12 @@ class AdvancedRiskManager:
         else:
             return "Severe"
 
-    def check_risk_limits(self) -> List[Dict]:
+    def check_risk_limits(self) -> list[dict]:
         """Check all risk limits and return violations."""
         violations = []
 
         # Calculate current portfolio metrics
-        total_exposure = sum(
-            abs(pos["size"] * pos["price"]) for pos in self.current_positions.values()
-        )
+        total_exposure = sum(abs(pos["size"]) for pos in self.current_positions.values())
 
         # Portfolio exposure check
         exposure_ratio = total_exposure / self.current_capital
@@ -664,7 +656,7 @@ class AdvancedRiskManager:
 
         # Individual position size checks
         for symbol, position in self.current_positions.items():
-            position_value = abs(position["size"] * position["price"])
+            position_value = abs(position["size"])
             position_ratio = position_value / self.current_capital
 
             if position_ratio > self.position_limits.max_position_size:
@@ -712,7 +704,7 @@ class AdvancedRiskManager:
 
         return violations
 
-    def update_market_condition(self, market_data: Dict):
+    def update_market_condition(self, market_data: dict):
         """Update market condition assessment based on current market data."""
 
         # Simple market condition detection based on volatility and trends
@@ -735,7 +727,14 @@ class AdvancedRiskManager:
 
         logger.info(f"Market condition updated to: {self.market_condition.value}")
 
-    def update_position(self, symbol: str, size: float, price: float, trade_return: float = None):
+    def update_position(
+        self,
+        symbol: str,
+        size: float,
+        price: float,
+        trade_return: float | None = None,
+        benchmark_return: float | None = None,
+    ):
         """Update position tracking and risk metrics."""
 
         # Update position
@@ -766,6 +765,12 @@ class AdvancedRiskManager:
             portfolio_return = trade_return * abs(size) / self.current_capital
             self.portfolio_returns.append(portfolio_return)
 
+            # Update benchmark returns
+            if benchmark_return is not None:
+                self.benchmark_returns.append(benchmark_return)
+            else:
+                self.benchmark_returns.append(portfolio_return)
+
             # Update capital
             self.current_capital += trade_return * abs(size)
 
@@ -773,15 +778,12 @@ class AdvancedRiskManager:
         if len(self.portfolio_returns) > 0:
             cumulative_return = np.prod([1 + r for r in self.portfolio_returns])
             peak_value = max(
-                [
-                    np.prod([1 + r for r in self.portfolio_returns[: i + 1]])
-                    for i in range(len(self.portfolio_returns))
-                ],
+                [np.prod([1 + r for r in self.portfolio_returns[: i + 1]]) for i in range(len(self.portfolio_returns))],
             )
             current_drawdown = (cumulative_return - peak_value) / peak_value
             self.drawdown_history.append(current_drawdown)
 
-    def get_risk_summary(self) -> Dict:
+    def get_risk_summary(self) -> dict:
         """Get comprehensive risk summary."""
 
         risk_metrics = self.calculate_portfolio_risk_metrics()
@@ -793,20 +795,14 @@ class AdvancedRiskManager:
             "stress_tests": stress_results,
             "violations": violations,
             "market_condition": self.market_condition.value,
-            "portfolio_exposure": sum(
-                abs(pos["size"] * pos["price"]) for pos in self.current_positions.values()
-            )
+            "portfolio_exposure": sum(abs(pos["size"]) for pos in self.current_positions.values())
             / self.current_capital,
             "current_positions": len(self.current_positions),
             "current_capital": self.current_capital,
             "total_trades": len(self.trade_history),
             "recent_performance": {
-                "last_30_days": np.mean(self.portfolio_returns[-30:])
-                if len(self.portfolio_returns) >= 30
-                else 0,
-                "last_7_days": np.mean(self.portfolio_returns[-7:])
-                if len(self.portfolio_returns) >= 7
-                else 0,
+                "last_30_days": np.mean(self.portfolio_returns[-30:]) if len(self.portfolio_returns) >= 30 else 0,
+                "last_7_days": np.mean(self.portfolio_returns[-7:]) if len(self.portfolio_returns) >= 7 else 0,
                 "ytd": np.mean(self.portfolio_returns) if self.portfolio_returns else 0,
             },
         }
@@ -833,7 +829,7 @@ class AdvancedRiskManager:
         """Load risk management state from file."""
 
         if os.path.exists(filepath):
-            with open(filepath, "r") as f:
+            with open(filepath) as f:
                 state = json.load(f)
 
             self.current_capital = state.get("current_capital", self.initial_capital)

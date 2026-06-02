@@ -17,6 +17,6 @@ __all__ = [
     "CircuitBreakerError",
     "ConnectionManager",
     "RetryConfig",
-    "retry_async",
     "get_granularity_mapping",
+    "retry_async",
 ]

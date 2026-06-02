@@ -156,3 +156,9 @@ Thumbs.db
 Project_Report/*
 
 Project_Report_Guidelines/*
+
+Thesis/*
+
+.blackboxrules
+
+uv.lock

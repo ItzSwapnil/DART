@@ -22,7 +22,6 @@ CHART_STYLES = {
 }
 
 
-
 def get_dark_style():
     """Returns a dark-themed style for mplfinance charts."""
     dark_style = CHART_STYLES.get("dark", {})

@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-2.0.1-blue?style=for-the-badge" alt="Version"/>
+  <img src="https://img.shields.io/badge/version-3.0.0-blue?style=for-the-badge" alt="Version"/>
   <img src="https://img.shields.io/badge/python-3.14+-green?style=for-the-badge&logo=python&logoColor=white" alt="Python"/>
   <img src="https://img.shields.io/badge/PyTorch-2.9+-red?style=for-the-badge&logo=pytorch&logoColor=white" alt="PyTorch"/>
   <img src="https://img.shields.io/badge/license-MIT-purple?style=for-the-badge" alt="License"/>
@@ -88,31 +88,37 @@ DART (Deep Adaptive Reinforcement Trader) is a sophisticated Python-based algori
 ```
 DART/
 ├── 🔌 api/                          # API Integration Layer
-│   └── deriv_client.py              # Deriv API with trading, proposals, and account management
+│   ├── deriv_client.py              # Deriv API with OAuth 2.0 PKCE, trading, and account management
+│   └── websocket_server.py          # Real-time WebSocket server for live UI push updates
 │
 ├── ⚙️ config/                        # Configuration
 │   └── dart_config.py               # Pydantic v2 SOTA configuration settings and validator
 │
 ├── 🧠 ml/                            # Machine Learning Core
 │   ├── deep_rl_agent.py             # Soft Actor-Critic with attention & curiosity modules
-│   ├── trading_ai_v3.py             # Ensemble learning and strategy generation
+│   ├── trading_ai_v3.py             # Ensemble learning (RF + GB + MLP) and strategy generation
 │   ├── feature_extractor.py         # 50+ technical indicators and sentiment analysis
 │   ├── risk_manager.py              # Monte Carlo VaR, Kelly criterion, position sizing
-│   └── auto_trader.py               # Automated trade execution engine
+│   ├── auto_trader.py               # Multi-symbol portfolio auto-trader with background monitoring
+│   ├── backtester.py                # Event-driven backtesting framework with risk integration
+│   ├── candlestick_patterns.py      # 8 vectorized candlestick pattern detectors
+│   ├── evaluation_monitor.py        # Trade & model evaluation, W&B integration, degradation alerts
+│   └── llm_market_analyzer.py       # LLM-powered market analysis via vLLM/OpenAI + LangChain
 │
 ├── 🎨 ui/                            # User Interfaces
 │   ├── app.py                       # Main desktop application (1900+ lines)
-│   ├── modern_dashboard.py          # Streamlit web dashboard with glassmorphism
+│   ├── modern_dashboard.py          # Streamlit web dashboard with glassmorphism & async caching
 │   ├── chart_styles.py              # Chart theming and visualization
 │   └── ui_theme.py                  # Theme management (dark/light modes)
 │
 ├── 🔧 utils/                         # Utilities
-│   ├── api_utils.py                 # API helpers and error handling
+│   ├── api_utils.py                 # Circuit breaker, retry logic, and error handling
+│   ├── logging.py                   # Structured logging with structlog
 │   └── timeframe.py                 # Timeframe conversions
 │
 ├── 📁 models/                        # Saved ML models (runtime generated)
 ├── 📁 logs/                          # Trading logs and performance data
-├── 📁 tests/                         # Unit and integration tests
+├── 📁 tests/                         # Unit and integration tests (54 tests)
 │
 ├── 🚀 main.py                        # Desktop app entry point
 └── 📋 pyproject.toml                 # Dependencies and project metadata
@@ -125,7 +131,8 @@ graph TB
     subgraph "Data Layer"
         API[Deriv API Client]
         FE[Feature Extractor]
-        SA[Sentiment Analyzer]
+        CP[Candlestick Patterns]
+        LLM[LLM Market Analyzer]
     end
     
     subgraph "AI Core"
@@ -144,16 +151,21 @@ graph TB
     subgraph "Execution"
         AT[Auto Trader]
         TL[Trade Logger]
+        BT[Backtester]
+        EM[Evaluation Monitor]
     end
     
     subgraph "UI Layer"
         GUI[Desktop App]
         WEB[Web Dashboard]
+        WS[WebSocket Server]
     end
     
     API --> FE
+    FE --> CP
     FE --> SAC
     FE --> ENS
+    LLM --> ENS
     SAC --> MRD
     ENS --> UQ
     MRD --> RM
@@ -162,9 +174,12 @@ graph TB
     PS --> AT
     DP --> AT
     AT --> TL
+    AT --> EM
     AT --> API
+    AT --> WS
+    BT --> RM
     GUI --> AT
-    WEB --> AT
+    WEB --> WS
 ```
 
 ---
@@ -243,6 +258,9 @@ The web dashboard features:
 - Real-time AI insights with epistemic/aleatoric uncertainty display
 - Interactive candlestick charts with technical indicators
 - Live performance metrics and trade history
+- Non-blocking async data fetching with background caching (zero UI freeze)
+- WebSocket real-time push updates from the Auto Trader
+- Multi-symbol portfolio trading support
 - Glassmorphism UI design with dark mode
 
 ### 📊 Sample Trading Session
@@ -370,19 +388,12 @@ DART tracks comprehensive performance metrics:
 - [x] Uncertainty quantification
 - [x] Web dashboard with Streamlit
 - [x] Multi-modal feature extraction (50+ indicators)
-
-### In Progress 🔄
-
-- [ ] Pattern recognition (candlestick patterns)
-- [ ] Backtesting framework
-- [ ] Portfolio management (multi-position)
-
-### Planned 📋
-
-- [ ] Mobile app companion
-- [ ] Social trading features
-- [ ] News sentiment integration
-- [ ] WebSocket real-time updates
+- [x] Pattern recognition (8 candlestick patterns)
+- [x] Backtesting framework
+- [x] Portfolio management (multi-symbol, multi-position)
+- [x] WebSocket real-time updates
+- [x] Non-blocking async dashboard with background caching
+- [x] LLM-powered market analysis (vLLM/OpenAI)
 
 ---
 
@@ -405,8 +416,8 @@ uv pip install -e ".[dev]"
 # Run tests
 pytest
 
-# Code formatting
-black .
+# Code formatting & linting
+ruff format .
 ruff check .
 ```
 

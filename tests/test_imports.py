@@ -1,7 +1,6 @@
 """Test that all DART modules can be imported successfully."""
 
 
-
 class TestCoreImports:
     """Test core module imports."""
 

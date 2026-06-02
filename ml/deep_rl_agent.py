@@ -15,20 +15,18 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-)
 logger = logging.getLogger("deep_rl_agent")
 
 # Experience tuple for replay buffer
 Experience = namedtuple(
-    "Experience", ["state", "action", "reward", "next_state", "done", "market_regime"],
+    "Experience",
+    ["state", "action", "reward", "next_state", "done", "market_regime"],
 )
 
 # N-step experience for multi-step returns
 NStepExperience = namedtuple(
-    "NStepExperience", ["states", "actions", "rewards", "next_state", "done", "market_regime"],
+    "NStepExperience",
+    ["states", "actions", "rewards", "next_state", "done", "market_regime"],
 )
 
 
@@ -36,7 +34,7 @@ class AttentionLayer(nn.Module):
     """Self-attention layer for processing temporal sequences."""
 
     def __init__(self, d_model, n_heads=8, dropout=0.1):
-        super(AttentionLayer, self).__init__()
+        super().__init__()
         self.d_model = d_model
         self.n_heads = n_heads
         self.head_dim = d_model // n_heads
@@ -58,7 +56,7 @@ class AttentionLayer(nn.Module):
         v = self.v_linear(x).view(batch_size, seq_len, self.n_heads, self.head_dim).transpose(1, 2)
 
         # Scaled dot-product attention
-        scores = torch.matmul(q, k.transpose(-2, -1)) / np.sqrt(self.head_dim)
+        scores = torch.matmul(q, k.transpose(-2, -1)) / math.sqrt(self.head_dim)
         attention_weights = F.softmax(scores, dim=-1)
         attention_weights = self.dropout(attention_weights)
 
@@ -75,9 +73,13 @@ class TradingEncoder(nn.Module):
     """Multi-modal encoder for financial data processing - v2.0 enhanced."""
 
     def __init__(
-        self, technical_features=20, fundamental_features=10, sequence_length=50, d_model=128,
+        self,
+        technical_features=20,
+        fundamental_features=10,
+        sequence_length=50,
+        d_model=128,
     ):
-        super(TradingEncoder, self).__init__()
+        super().__init__()
         self.d_model = d_model
         self.sequence_length = sequence_length
 
@@ -119,8 +121,6 @@ class TradingEncoder(nn.Module):
         return nn.Parameter(pe.unsqueeze(0), requires_grad=False)
 
     def forward(self, technical_data, price_data, volume_data, fundamental_data=None):
-        _batch_size = technical_data.size(0)  # noqa: F841 - kept for debugging
-
         # Process technical indicators
         tech_conv = F.relu(self.technical_conv(technical_data.transpose(1, 2)))
         tech_conv = tech_conv.transpose(1, 2)
@@ -163,7 +163,7 @@ class GaussianActor(nn.Module):
     """Gaussian actor network for SAC with reparameterization trick."""
 
     def __init__(self, state_dim, action_dim, max_action=1.0, log_std_min=-20, log_std_max=2):
-        super(GaussianActor, self).__init__()
+        super().__init__()
         self.max_action = max_action
         self.log_std_min = log_std_min
         self.log_std_max = log_std_max
@@ -217,7 +217,12 @@ class GaussianActor(nn.Module):
         return action * self.max_action, log_prob, mean
 
     def get_action(
-        self, technical_data, price_data, volume_data, fundamental_data=None, deterministic=False,
+        self,
+        technical_data,
+        price_data,
+        volume_data,
+        fundamental_data=None,
+        deterministic=False,
     ):
         """Get action for evaluation."""
         mean, log_std = self.forward(technical_data, price_data, volume_data, fundamental_data)
@@ -237,7 +242,7 @@ class Critic(nn.Module):
     """Twin critic networks for value estimation - v2.0 enhanced."""
 
     def __init__(self, state_dim, action_dim):
-        super(Critic, self).__init__()
+        super().__init__()
 
         # State encoder (shared for efficiency)
         self.encoder = TradingEncoder()
@@ -287,7 +292,7 @@ class CuriosityModule(nn.Module):
     """Intrinsic Curiosity Module (ICM) for exploration - v2.0 feature."""
 
     def __init__(self, state_dim=128, action_dim=3, feature_dim=64):
-        super(CuriosityModule, self).__init__()
+        super().__init__()
 
         # Inverse model: predict action from state and next_state
         self.inverse_model = nn.Sequential(
@@ -315,7 +320,6 @@ class CuriosityModule(nn.Module):
     def forward(self, state, next_state, action):
         """Compute intrinsic reward from curiosity."""
         # Encode states to features
-        _state_feat = self.feature_encoder(state)  # noqa: F841 - features learned via inverse model
         next_state_feat = self.feature_encoder(next_state)
 
         # Inverse model prediction (for learning state features)
@@ -328,7 +332,9 @@ class CuriosityModule(nn.Module):
 
         # Intrinsic reward: prediction error of forward model
         intrinsic_reward = 0.5 * F.mse_loss(
-            pred_next_feat, next_state_feat.detach(), reduction="none",
+            pred_next_feat,
+            next_state_feat.detach(),
+            reduction="none",
         ).mean(dim=-1)
 
         # Inverse model loss
@@ -344,7 +350,7 @@ class MarketRegimeDetector(nn.Module):
     """Enhanced market regime detection using VAE architecture - v2.0."""
 
     def __init__(self, input_dim=128, latent_dim=16, n_regimes=7):
-        super(MarketRegimeDetector, self).__init__()
+        super().__init__()
         self.n_regimes = n_regimes
         self.latent_dim = latent_dim
 
@@ -361,7 +367,9 @@ class MarketRegimeDetector(nn.Module):
 
         # Regime classifier with temperature scaling
         self.regime_classifier = nn.Sequential(
-            nn.Linear(latent_dim, 32), nn.ReLU(), nn.Linear(32, n_regimes),
+            nn.Linear(latent_dim, 32),
+            nn.ReLU(),
+            nn.Linear(32, n_regimes),
         )
         self.temperature = nn.Parameter(torch.ones(1) * 1.5)
 
@@ -406,7 +414,13 @@ class NStepReplayBuffer:
     """N-step prioritized experience replay buffer for multi-step returns - v2.0 feature."""
 
     def __init__(
-        self, capacity=100000, n_steps=3, gamma=0.99, alpha=0.6, beta=0.4, beta_increment=0.001,
+        self,
+        capacity=100000,
+        n_steps=3,
+        gamma=0.99,
+        alpha=0.6,
+        beta=0.4,
+        beta_increment=0.001,
     ):
         self.capacity = capacity
         self.n_steps = n_steps
@@ -456,22 +470,29 @@ class NStepReplayBuffer:
         if len(self.buffer) < self.capacity:
             self.buffer.append(
                 Experience(
-                    state, action, n_step_reward, n_step_next_state, n_step_done, market_regime,
+                    state,
+                    action,
+                    n_step_reward,
+                    n_step_next_state,
+                    n_step_done,
+                    market_regime,
                 ),
             )
         else:
             self.buffer[self.position] = Experience(
-                state, action, n_step_reward, n_step_next_state, n_step_done, market_regime,
+                state,
+                action,
+                n_step_reward,
+                n_step_next_state,
+                n_step_done,
+                market_regime,
             )
 
         self.priorities[self.position] = max_priority
         self.position = (self.position + 1) % self.capacity
 
     def sample(self, batch_size):
-        if len(self.buffer) == self.capacity:
-            priorities = self.priorities
-        else:
-            priorities = self.priorities[: self.position]
+        priorities = self.priorities if len(self.buffer) == self.capacity else self.priorities[: self.position]
 
         probs = priorities**self.alpha
         probs /= probs.sum()
@@ -490,7 +511,7 @@ class NStepReplayBuffer:
         return samples, indices, weights
 
     def update_priorities(self, indices, priorities):
-        for idx, priority in zip(indices, priorities):
+        for idx, priority in zip(indices, priorities, strict=False):
             self.priorities[idx] = priority
 
     def __len__(self):
@@ -547,7 +568,9 @@ class SoftActorCriticV2:
         # Optimizers
         self.actor_optimizer = optim.Adam(self.actor.parameters(), lr=lr_actor, weight_decay=1e-5)
         self.critic_optimizer = optim.Adam(
-            self.critic.parameters(), lr=lr_critic, weight_decay=1e-5,
+            self.critic.parameters(),
+            lr=lr_critic,
+            weight_decay=1e-5,
         )
         self.regime_optimizer = optim.Adam(self.regime_detector.parameters(), lr=lr_critic)
 
@@ -578,7 +601,7 @@ class SoftActorCriticV2:
 
     def _hard_update(self, source, target):
         """Hard update of target network."""
-        for target_param, param in zip(target.parameters(), source.parameters()):
+        for target_param, param in zip(target.parameters(), source.parameters(), strict=False):
             target_param.data.copy_(param.data)
 
     def select_action(self, state_data, eval_mode=False):
@@ -588,26 +611,55 @@ class SoftActorCriticV2:
         self.actor.eval()
         with torch.no_grad():
             action = self.actor.get_action(
-                technical_data, price_data, volume_data, fundamental_data, deterministic=eval_mode,
+                technical_data,
+                price_data,
+                volume_data,
+                fundamental_data,
+                deterministic=eval_mode,
             )
             return action.cpu().numpy()[0]
 
     def _process_state(self, state_data):
         """Process raw state data into tensor format."""
-        technical_data = torch.FloatTensor(state_data.get("technical", np.zeros((1, 50, 20)))).to(
-            self.device,
-        )
-        price_data = torch.FloatTensor(state_data.get("price", np.zeros((1, 50, 4)))).to(
-            self.device,
-        )
-        volume_data = torch.FloatTensor(state_data.get("volume", np.zeros((1, 50)))).to(self.device)
-        fundamental_data = (
-            torch.FloatTensor(state_data.get("fundamental", np.zeros((1, 10)))).to(self.device)
-            if "fundamental" in state_data
-            else None
-        )
+        tech = state_data.get("technical", np.zeros((1, 50, 20)))
+        price = state_data.get("price", np.zeros((1, 50, 4)))
+        volume = state_data.get("volume", np.zeros((1, 50)))
+        
+        tech_tensor = torch.as_tensor(tech, dtype=torch.float32).to(self.device)
+        price_tensor = torch.as_tensor(price, dtype=torch.float32).to(self.device)
+        volume_tensor = torch.as_tensor(volume, dtype=torch.float32).to(self.device)
+        
+        # Ensure 3D shapes: [1, 50, 20] for technical, [1, 50, 4] for price, [1, 50] for volume
+        if tech_tensor.ndim == 2:
+            tech_tensor = tech_tensor.unsqueeze(0)
+        elif tech_tensor.ndim == 4:
+            tech_tensor = tech_tensor.squeeze()
+            if tech_tensor.ndim == 2:
+                tech_tensor = tech_tensor.unsqueeze(0)
+                
+        if price_tensor.ndim == 2:
+            price_tensor = price_tensor.unsqueeze(0)
+        elif price_tensor.ndim == 4:
+            price_tensor = price_tensor.squeeze()
+            if price_tensor.ndim == 2:
+                price_tensor = price_tensor.unsqueeze(0)
+                
+        if volume_tensor.ndim == 1:
+            volume_tensor = volume_tensor.unsqueeze(0)
+        elif volume_tensor.ndim == 3:
+            volume_tensor = volume_tensor.squeeze()
+            if volume_tensor.ndim == 1:
+                volume_tensor = volume_tensor.unsqueeze(0)
 
-        return technical_data, price_data, volume_data, fundamental_data
+        fundamental_data = None
+        if "fundamental" in state_data:
+            fund = state_data["fundamental"]
+            fund_tensor = torch.as_tensor(fund, dtype=torch.float32).to(self.device)
+            if fund_tensor.ndim == 1:
+                fund_tensor = fund_tensor.unsqueeze(0)
+            fundamental_data = fund_tensor
+
+        return tech_tensor, price_tensor, volume_tensor, fundamental_data
 
     def store_transition(self, state, action, reward, next_state, done, market_regime):
         """Store experience in replay buffer."""
@@ -633,15 +685,13 @@ class SoftActorCriticV2:
 
         # Unpack experiences
         states = [e.state for e in experiences]
-        actions = torch.FloatTensor([e.action for e in experiences]).to(self.device)
+        actions = torch.FloatTensor(np.array([e.action for e in experiences])).to(self.device)
         rewards = torch.FloatTensor([e.reward for e in experiences]).to(self.device).unsqueeze(1)
         next_states = [e.next_state for e in experiences]
         dones = torch.FloatTensor([float(e.done) for e in experiences]).to(self.device).unsqueeze(1)
 
         # Process states
-        current_technical, current_price, current_volume, current_fundamental = (
-            self._process_batch_states(states)
-        )
+        current_technical, current_price, current_volume, current_fundamental = self._process_batch_states(states)
         next_technical, next_price, next_volume, next_fundamental = self._process_batch_states(
             next_states,
         )
@@ -649,17 +699,25 @@ class SoftActorCriticV2:
         # Get state encodings for curiosity
         with torch.no_grad():
             current_encoding = self.critic.encoder(
-                current_technical, current_price, current_volume, current_fundamental,
+                current_technical,
+                current_price,
+                current_volume,
+                current_fundamental,
             )
             next_encoding = self.critic.encoder(
-                next_technical, next_price, next_volume, next_fundamental,
+                next_technical,
+                next_price,
+                next_volume,
+                next_fundamental,
             )
 
         # Compute intrinsic reward if using curiosity
         intrinsic_reward = torch.zeros_like(rewards)
         if self.use_curiosity:
             intrinsic_reward, inverse_loss, forward_loss = self.curiosity(
-                current_encoding, next_encoding, actions,
+                current_encoding,
+                next_encoding,
+                actions,
             )
             intrinsic_reward = intrinsic_reward.unsqueeze(1) * self.curiosity_coef
 
@@ -676,11 +734,18 @@ class SoftActorCriticV2:
         # Update critic with n-step returns (gamma^n already computed in buffer)
         with torch.no_grad():
             next_actions, next_log_probs, _ = self.actor.sample(
-                next_technical, next_price, next_volume, next_fundamental,
+                next_technical,
+                next_price,
+                next_volume,
+                next_fundamental,
             )
 
             next_q1, next_q2 = self.critic_target(
-                next_technical, next_price, next_volume, next_actions, next_fundamental,
+                next_technical,
+                next_price,
+                next_volume,
+                next_actions,
+                next_fundamental,
             )
             next_q = torch.min(next_q1, next_q2) - self.alpha * next_log_probs
 
@@ -688,7 +753,11 @@ class SoftActorCriticV2:
             target_q = total_rewards + (self.gamma**self.n_steps) * next_q * (1 - dones)
 
         current_q1, current_q2 = self.critic(
-            current_technical, current_price, current_volume, actions, current_fundamental,
+            current_technical,
+            current_price,
+            current_volume,
+            actions,
+            current_fundamental,
         )
 
         # Compute TD errors for prioritized replay
@@ -713,7 +782,10 @@ class SoftActorCriticV2:
         # Update actor (delayed update for stability)
         if self.training_steps % 2 == 0:
             current_actions, log_probs, _ = self.actor.sample(
-                current_technical, current_price, current_volume, current_fundamental,
+                current_technical,
+                current_price,
+                current_volume,
+                current_fundamental,
             )
 
             q1_actor, q2_actor = self.critic(
@@ -760,9 +832,7 @@ class SoftActorCriticV2:
 
         return {
             "critic_loss": critic_loss.item(),
-            "actor_loss": self.training_metrics["actor_loss"][-1]
-            if self.training_metrics["actor_loss"]
-            else 0,
+            "actor_loss": self.training_metrics["actor_loss"][-1] if self.training_metrics["actor_loss"] else 0,
             "regime_loss": regime_loss,
             "alpha": self.alpha.item(),
             "intrinsic_reward": intrinsic_reward.mean().item(),
@@ -771,23 +841,85 @@ class SoftActorCriticV2:
 
     def _process_batch_states(self, states):
         """Process a batch of states."""
-        _batch_size = len(states)  # noqa: F841 - kept for documentation
-        technical_data = torch.stack(
-            [torch.FloatTensor(s.get("technical", np.zeros((50, 20)))) for s in states],
-        ).to(self.device)
-        price_data = torch.stack(
-            [torch.FloatTensor(s.get("price", np.zeros((50, 4)))) for s in states],
-        ).to(self.device)
-        volume_data = torch.stack(
-            [torch.FloatTensor(s.get("volume", np.zeros((50,)))) for s in states],
-        ).to(self.device)
+        processed_tech = []
+        processed_price = []
+        processed_volume = []
+
+        for s in states:
+            # Technical features
+            tech = s.get("technical", np.zeros((50, 20)))
+            tech_tensor = torch.as_tensor(tech, dtype=torch.float32)
+            
+            # Squeeze out any unnecessary dimensions of size 1
+            if tech_tensor.ndim == 4:
+                tech_tensor = tech_tensor.squeeze(0).squeeze(1)
+            elif tech_tensor.ndim == 3:
+                tech_tensor = tech_tensor.squeeze(0)
+            
+            # Ensure final shape is exactly [50, 20]
+            if tech_tensor.shape != (50, 20):
+                if tech_tensor.numel() == 1000:
+                    tech_tensor = tech_tensor.reshape(50, 20)
+                else:
+                    new_tech = torch.zeros(50, 20, dtype=torch.float32)
+                    h = min(50, tech_tensor.shape[0]) if tech_tensor.ndim > 0 else 0
+                    w = min(20, tech_tensor.shape[-1]) if tech_tensor.ndim > 1 else 0
+                    if h > 0 and w > 0:
+                        new_tech[:h, :w] = tech_tensor[:h, :w]
+                    tech_tensor = new_tech
+            processed_tech.append(tech_tensor)
+
+            # Price features
+            price = s.get("price", np.zeros((50, 4)))
+            price_tensor = torch.as_tensor(price, dtype=torch.float32)
+            
+            if price_tensor.ndim == 4:
+                price_tensor = price_tensor.squeeze(0).squeeze(1)
+            elif price_tensor.ndim == 3:
+                price_tensor = price_tensor.squeeze(0)
+                
+            if price_tensor.shape != (50, 4):
+                if price_tensor.numel() == 200:
+                    price_tensor = price_tensor.reshape(50, 4)
+                else:
+                    new_price = torch.zeros(50, 4, dtype=torch.float32)
+                    h = min(50, price_tensor.shape[0]) if price_tensor.ndim > 0 else 0
+                    w = min(4, price_tensor.shape[-1]) if price_tensor.ndim > 1 else 0
+                    if h > 0 and w > 0:
+                        new_price[:h, :w] = price_tensor[:h, :w]
+                    price_tensor = new_price
+            processed_price.append(price_tensor)
+
+            # Volume features
+            vol = s.get("volume", np.zeros((50,)))
+            vol_tensor = torch.as_tensor(vol, dtype=torch.float32)
+            
+            if vol_tensor.ndim == 3:
+                vol_tensor = vol_tensor.squeeze(0).squeeze(1)
+            elif vol_tensor.ndim == 2:
+                vol_tensor = vol_tensor.squeeze(0)
+                
+            if vol_tensor.shape != (50,):
+                if vol_tensor.numel() == 50:
+                    vol_tensor = vol_tensor.reshape(50)
+                else:
+                    new_vol = torch.zeros(50, dtype=torch.float32)
+                    h = min(50, vol_tensor.shape[0]) if vol_tensor.ndim > 0 else 0
+                    if h > 0:
+                        new_vol[:h] = vol_tensor[:h]
+                    vol_tensor = new_vol
+            processed_volume.append(vol_tensor)
+
+        technical_data = torch.stack(processed_tech).to(self.device)
+        price_data = torch.stack(processed_price).to(self.device)
+        volume_data = torch.stack(processed_volume).to(self.device)
         fundamental_data = None
 
         return technical_data, price_data, volume_data, fundamental_data
 
     def _train_regime_detector(self, state_encoding):
         """Train the market regime detector."""
-        reconstruction, regime_probs, mean, log_var, z = self.regime_detector(state_encoding)
+        reconstruction, regime_probs, mean, log_var, _z = self.regime_detector(state_encoding)
 
         # VAE loss with KL annealing
         recon_loss = F.mse_loss(reconstruction, state_encoding, reduction="mean")
@@ -808,7 +940,7 @@ class SoftActorCriticV2:
 
     def _soft_update(self, source, target):
         """Soft update of target networks."""
-        for target_param, param in zip(target.parameters(), source.parameters()):
+        for target_param, param in zip(target.parameters(), source.parameters(), strict=False):
             target_param.data.copy_(target_param.data * (1.0 - self.tau) + param.data * self.tau)
 
     def detect_market_regime(self, state_data):
@@ -819,7 +951,10 @@ class SoftActorCriticV2:
         self.regime_detector.eval()
         with torch.no_grad():
             state_encoding = self.critic.encoder(
-                technical_data, price_data, volume_data, fundamental_data,
+                technical_data,
+                price_data,
+                volume_data,
+                fundamental_data,
             )
             _, regime_probs, _, _, z = self.regime_detector(state_encoding)
             regime_id = torch.argmax(regime_probs, dim=-1).item()
@@ -885,7 +1020,7 @@ class SoftActorCriticV2:
     def load_models(self, filepath):
         """Load all model parameters."""
         if os.path.exists(filepath):
-            checkpoint = torch.load(filepath, map_location=self.device)
+            checkpoint = torch.load(filepath, map_location=self.device, weights_only=True)
 
             self.actor.load_state_dict(checkpoint["actor_state_dict"])
             self.critic.load_state_dict(checkpoint["critic_state_dict"])

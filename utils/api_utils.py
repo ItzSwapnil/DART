@@ -9,9 +9,10 @@ import asyncio
 import logging
 import random
 import time
+from collections.abc import Callable
 from enum import Enum
 from functools import wraps
-from typing import Any, Callable, Optional, TypeVar
+from typing import Any, TypeVar
 
 logger = logging.getLogger("api_utils")
 
@@ -78,20 +79,21 @@ class CircuitBreaker:
 
         self._state = CircuitState.CLOSED
         self._failure_count = 0
-        self._last_failure_time: Optional[float] = None
+        self._last_failure_time: float | None = None
         self._half_open_calls = 0
         self._lock = asyncio.Lock()
 
     @property
     def state(self) -> CircuitState:
         """Get current circuit state, updating if recovery time has passed."""
-        if self._state == CircuitState.OPEN:
-            if self._last_failure_time and (
-                time.time() - self._last_failure_time >= self.recovery_timeout
-            ):
-                self._state = CircuitState.HALF_OPEN
-                self._half_open_calls = 0
-                logger.info("Circuit breaker transitioning to HALF_OPEN state")
+        if (
+            self._state == CircuitState.OPEN
+            and self._last_failure_time
+            and (time.time() - self._last_failure_time >= self.recovery_timeout)
+        ):
+            self._state = CircuitState.HALF_OPEN
+            self._half_open_calls = 0
+            logger.info("Circuit breaker transitioning to HALF_OPEN state")
         return self._state
 
     async def can_execute(self) -> bool:
@@ -225,8 +227,8 @@ def is_retryable_error(error: Exception) -> bool:
 
 
 def retry_async(
-    config: Optional[RetryConfig] = None,
-    circuit_breaker: Optional[CircuitBreaker] = None,
+    config: RetryConfig | None = None,
+    circuit_breaker: CircuitBreaker | None = None,
 ):
     """
     Decorator for async functions that implements retry with exponential backoff.
@@ -251,13 +253,12 @@ def retry_async(
         @wraps(func)
         async def wrapper(*args, **kwargs) -> Any:
             # Check circuit breaker if provided
-            if circuit_breaker:
-                if not await circuit_breaker.can_execute():
-                    raise CircuitBreakerError(
-                        f"Circuit breaker is open for {func.__name__}",
-                    )
+            if circuit_breaker and not await circuit_breaker.can_execute():
+                raise CircuitBreakerError(
+                    f"Circuit breaker is open for {func.__name__}",
+                )
 
-            last_exception: Optional[Exception] = None
+            last_exception: Exception | None = None
 
             for attempt in range(config.max_retries + 1):
                 try:
@@ -321,7 +322,7 @@ class ConnectionManager:
         self.reconnect_delay = reconnect_delay
 
         self._is_connected = False
-        self._last_successful_connection: Optional[float] = None
+        self._last_successful_connection: float | None = None
         self._reconnect_attempts = 0
         self._connection_callbacks: list[Callable[[bool], None]] = []
         self._lock = asyncio.Lock()
@@ -408,3 +409,16 @@ class ConnectionManager:
         self._is_connected = False
         self._last_successful_connection = None
         self._reconnect_attempts = 0
+
+
+__all__ = [
+    "DEFAULT_RETRY_CONFIG",
+    "CircuitBreaker",
+    "CircuitBreakerError",
+    "CircuitState",
+    "ConnectionManager",
+    "RetryConfig",
+    "calculate_backoff_delay",
+    "is_retryable_error",
+    "retry_async",
+]

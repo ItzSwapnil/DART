@@ -5,14 +5,12 @@ Comprehensive metrics, monitoring, and continuous evaluation.
 
 import json
 import logging
+from dataclasses import asdict, dataclass
 from datetime import datetime
-from typing import Dict, List, Optional
-from dataclasses import dataclass, asdict
 from pathlib import Path
 
 import numpy as np
-import pandas as pd
-from sklearn.metrics import precision_recall_curve, roc_auc_score, f1_score
+from sklearn.metrics import f1_score, roc_auc_score
 
 try:
     import wandb
@@ -83,8 +81,8 @@ class EvaluationPipeline:
         self.project_name = project_name
         self.entity = entity
         self.use_wandb = use_wandb
-        self.metrics_history: List[TradeMetrics] = []
-        self.model_metrics_history: List[ModelMetrics] = []
+        self.metrics_history: list[TradeMetrics] = []
+        self.model_metrics_history: list[ModelMetrics] = []
 
         if use_wandb and wandb is not None:
             try:
@@ -101,7 +99,7 @@ class EvaluationPipeline:
         self,
         y_true: np.ndarray,
         y_pred: np.ndarray,
-        y_pred_proba: Optional[np.ndarray] = None,
+        y_pred_proba: np.ndarray | None = None,
         model_name: str = "ensemble",
     ) -> ModelMetrics:
         """
@@ -120,13 +118,9 @@ class EvaluationPipeline:
             accuracy=float(np.mean(y_pred == y_true)),
             precision=float(np.mean(y_pred[y_true == 1] == 1)) if np.any(y_true == 1) else 0.0,
             recall=float(
-                np.sum((y_pred == 1) & (y_true == 1)) / np.sum(y_true == 1)
-                if np.sum(y_true == 1) > 0
-                else 0.0
+                np.sum((y_pred == 1) & (y_true == 1)) / np.sum(y_true == 1) if np.sum(y_true == 1) > 0 else 0.0
             ),
-            f1=float(
-                f1_score(y_true, y_pred) if len(np.unique(y_true)) > 1 else 0.0
-            ),
+            f1=float(f1_score(y_true, y_pred) if len(np.unique(y_true)) > 1 else 0.0),
             model_name=model_name,
             timestamp=datetime.now().isoformat(),
         )
@@ -147,7 +141,7 @@ class EvaluationPipeline:
 
     def evaluate_trading_performance(
         self,
-        trades: List[Dict],
+        trades: list[dict],
         initial_balance: float = 1000.0,
     ) -> TradeMetrics:
         """
@@ -180,11 +174,7 @@ class EvaluationPipeline:
             profit_factor=total_profit / total_loss if total_loss > 0 else 0.0,
             avg_profit_per_trade=total_profit / wins if wins > 0 else 0.0,
             avg_loss_per_trade=total_loss / losses if losses > 0 else 0.0,
-            risk_reward_ratio=(
-                (total_profit / wins) / (total_loss / losses)
-                if wins > 0 and losses > 0
-                else 0.0
-            ),
+            risk_reward_ratio=((total_profit / wins) / (total_loss / losses) if wins > 0 and losses > 0 else 0.0),
             timestamp=datetime.now().isoformat(),
         )
 
@@ -228,7 +218,7 @@ class EvaluationPipeline:
 
         return metrics
 
-    def get_performance_summary(self) -> Dict:
+    def get_performance_summary(self) -> dict:
         """Get performance summary from history."""
         if not self.metrics_history:
             return {}
@@ -299,10 +289,10 @@ class ContinuousEvaluator:
     def __init__(self, evaluation_interval_trades: int = 50):
         """Initialize continuous evaluator."""
         self.evaluation_interval_trades = evaluation_interval_trades
-        self.trade_buffer: List[Dict] = []
-        self.evaluation_history: List[Dict] = []
+        self.trade_buffer: list[dict] = []
+        self.evaluation_history: list[dict] = []
 
-    def add_trade(self, trade: Dict) -> None:
+    def add_trade(self, trade: dict) -> None:
         """Add trade to buffer."""
         self.trade_buffer.append(trade)
 
@@ -310,7 +300,7 @@ class ContinuousEvaluator:
         """Check if evaluation threshold reached."""
         return len(self.trade_buffer) >= self.evaluation_interval_trades
 
-    def evaluate(self, pipeline: EvaluationPipeline) -> Optional[TradeMetrics]:
+    def evaluate(self, pipeline: EvaluationPipeline) -> TradeMetrics | None:
         """Evaluate if threshold reached."""
         if not self.should_evaluate():
             return None

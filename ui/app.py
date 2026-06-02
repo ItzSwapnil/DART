@@ -1,6 +1,13 @@
+import os
+import sys
+
+# Prioritize local DART imports
+parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if parent_dir not in sys.path:
+    sys.path.insert(0, parent_dir)
+
 import asyncio
 import datetime
-import os
 import threading
 import tkinter as tk
 from tkinter import messagebox, ttk
@@ -26,6 +33,8 @@ DERIV_ACCOUNT_ID = config.api.deriv_account_id
 DERIV_APP_ID = config.api.deriv_app_id
 USE_DEEP_RL = config.ai.use_deep_rl
 USE_ENHANCED_FEATURES = config.ai.use_ensemble_ml
+import contextlib
+
 from ml.auto_trader import AutoTrader
 from ui.chart_styles import get_chart_style
 from ui.ui_theme import configure_styles, format_currency
@@ -53,10 +62,8 @@ class DerivApp:
         self.root.minsize(1000, 700)
 
         # Set window icon (if available)
-        try:
+        with contextlib.suppress(Exception):
             self.root.iconbitmap("DART-Logo.png")
-        except Exception:
-            pass
 
         # Initialize the Deriv client with OAuth 2.0
         self.client = DerivClient(
@@ -124,7 +131,7 @@ class DerivApp:
                 self.notebook.add(self.analytics_tab, text="📊 Analytics")
                 self.notebook.add(self.ai_tab, text="🤖 AI Management")
                 self.notebook.add(self.settings_tab, text="⚙️ Settings")
-            except (UnicodeError, UnicodeEncodeError, UnicodeDecodeError):
+            except UnicodeError, UnicodeEncodeError, UnicodeDecodeError:
                 # Fallback without emoji for compatibility
                 self.notebook.add(self.trading_tab, text="Trading Dashboard")
                 self.notebook.add(self.analytics_tab, text="Analytics")
@@ -190,21 +197,34 @@ class DerivApp:
         conn_frame.grid(row=0, column=0, padx=10, pady=5, sticky=tk.W)
 
         ttk.Label(conn_frame, text="🔗 Connection:", font=("Arial", 10, "bold")).grid(
-            row=0, column=0, sticky=tk.W,
+            row=0,
+            column=0,
+            sticky=tk.W,
         )
         self.connection_status_var = tk.StringVar(value="Checking...")
         self.connection_status = ttk.Label(
-            conn_frame, textvariable=self.connection_status_var, font=("Arial", 10),
+            conn_frame,
+            textvariable=self.connection_status_var,
+            font=("Arial", 10),
         )
         self.connection_status.grid(row=0, column=1, padx=(5, 0), sticky=tk.W)
 
         # Connection indicator with better visualization
         self.connection_indicator_canvas = tk.Canvas(
-            conn_frame, width=20, height=20, highlightthickness=0,
+            conn_frame,
+            width=20,
+            height=20,
+            highlightthickness=0,
         )
         self.connection_indicator_canvas.grid(row=0, column=2, padx=(5, 0))
         self.connection_indicator = self.connection_indicator_canvas.create_oval(
-            2, 2, 18, 18, fill="gray", outline="white", width=2,
+            2,
+            2,
+            18,
+            18,
+            fill="gray",
+            outline="white",
+            width=2,
         )
 
         # Account balance with currency
@@ -212,11 +232,15 @@ class DerivApp:
         balance_frame.grid(row=0, column=1, padx=10, pady=5, sticky=tk.W)
 
         ttk.Label(balance_frame, text="💵 Balance:", font=("Arial", 10, "bold")).grid(
-            row=0, column=0, sticky=tk.W,
+            row=0,
+            column=0,
+            sticky=tk.W,
         )
         self.balance_var = tk.StringVar(value="--")
         self.balance_value = ttk.Label(
-            balance_frame, textvariable=self.balance_var, font=("Arial", 10, "bold"),
+            balance_frame,
+            textvariable=self.balance_var,
+            font=("Arial", 10, "bold"),
         )
         self.balance_value.grid(row=0, column=1, padx=(5, 0), sticky=tk.W)
 
@@ -225,7 +249,9 @@ class DerivApp:
         pnl_frame.grid(row=0, column=2, padx=10, pady=5, sticky=tk.W)
 
         ttk.Label(pnl_frame, text="📈 Today's P&L:", font=("Arial", 10, "bold")).grid(
-            row=0, column=0, sticky=tk.W,
+            row=0,
+            column=0,
+            sticky=tk.W,
         )
         self.pnl_var = tk.StringVar(value="$0.00")
         self.pnl_value = ttk.Label(pnl_frame, textvariable=self.pnl_var, font=("Arial", 10, "bold"))
@@ -236,17 +262,24 @@ class DerivApp:
         winrate_frame.grid(row=0, column=3, padx=10, pady=5, sticky=tk.W)
 
         ttk.Label(winrate_frame, text="🎯 Win Rate:", font=("Arial", 10, "bold")).grid(
-            row=0, column=0, sticky=tk.W,
+            row=0,
+            column=0,
+            sticky=tk.W,
         )
         self.winrate_var = tk.StringVar(value="0%")
         self.winrate_value = ttk.Label(
-            winrate_frame, textvariable=self.winrate_var, font=("Arial", 10, "bold"),
+            winrate_frame,
+            textvariable=self.winrate_var,
+            font=("Arial", 10, "bold"),
         )
         self.winrate_value.grid(row=0, column=1, padx=(5, 0), sticky=tk.W)
 
         # Refresh button
         ttk.Button(metrics_frame, text="🔄 Refresh", command=self.refresh_account_info).grid(
-            row=0, column=4, padx=10, pady=5,
+            row=0,
+            column=4,
+            padx=10,
+            pady=5,
         )
 
     def _setup_market_controls(self, parent):
@@ -259,24 +292,38 @@ class DerivApp:
 
         # Market selection with search capability
         ttk.Label(controls_frame, text="Market:", font=("Arial", 10, "bold")).grid(
-            row=0, column=0, padx=5, pady=5, sticky=tk.W,
+            row=0,
+            column=0,
+            padx=5,
+            pady=5,
+            sticky=tk.W,
         )
 
         self.market_var = tk.StringVar()
         self.market_combobox = ttk.Combobox(
-            controls_frame, textvariable=self.market_var, state="readonly", width=35,
+            controls_frame,
+            textvariable=self.market_var,
+            state="readonly",
+            width=35,
         )
         self.market_combobox.grid(row=0, column=1, padx=5, pady=5, sticky=tk.W)
         self.market_combobox.bind("<<ComboboxSelected>>", self.on_selection_change)
 
         # Timeframe selection
         ttk.Label(controls_frame, text="Timeframe:", font=("Arial", 10, "bold")).grid(
-            row=0, column=2, padx=5, pady=5, sticky=tk.W,
+            row=0,
+            column=2,
+            padx=5,
+            pady=5,
+            sticky=tk.W,
         )
 
         self.timeframe_var = tk.StringVar()
         self.timeframe_combobox = ttk.Combobox(
-            controls_frame, textvariable=self.timeframe_var, state="readonly", width=15,
+            controls_frame,
+            textvariable=self.timeframe_var,
+            state="readonly",
+            width=15,
         )
         timeframe_values = list(get_granularity_mapping().keys())
         self.timeframe_combobox["values"] = timeframe_values
@@ -311,7 +358,8 @@ class DerivApp:
 
         # Theme toggle
         ttk.Button(options_frame, text="🎨 Theme", command=self.toggle_theme).pack(
-            side=tk.LEFT, padx=5,
+            side=tk.LEFT,
+            padx=5,
         )
 
     def _setup_enhanced_trading_controls(self, parent):
@@ -328,12 +376,15 @@ class DerivApp:
         model_frame.pack(side=tk.LEFT, fill=tk.Y, padx=(0, 10))
 
         self.train_button = ttk.Button(
-            model_frame, text="🎯 Train Model", command=self.on_train_model,
+            model_frame,
+            text="🎯 Train Model",
+            command=self.on_train_model,
         )
         self.train_button.pack(fill=tk.X, pady=2)
 
         ttk.Button(model_frame, text="📊 Analyze Market", command=self.analyze_market).pack(
-            fill=tk.X, pady=2,
+            fill=tk.X,
+            pady=2,
         )
 
         # Trading controls
@@ -341,12 +392,16 @@ class DerivApp:
         trade_frame.pack(side=tk.LEFT, fill=tk.Y, padx=(0, 10))
 
         self.start_trading_button = ttk.Button(
-            trade_frame, text="🚀 Start Trading", command=self.on_start_trading,
+            trade_frame,
+            text="🚀 Start Trading",
+            command=self.on_start_trading,
         )
         self.start_trading_button.pack(fill=tk.X, pady=2)
 
         self.stop_trading_button = ttk.Button(
-            trade_frame, text="🛑 Stop Trading", command=self.on_stop_trading,
+            trade_frame,
+            text="🛑 Stop Trading",
+            command=self.on_stop_trading,
         )
         self.stop_trading_button.pack(fill=tk.X, pady=2)
         self.stop_trading_button.config(state=tk.DISABLED)
@@ -382,23 +437,30 @@ class DerivApp:
 
         self.deep_rl_var = tk.BooleanVar(value=USE_DEEP_RL)
         ttk.Checkbutton(features_frame, text="🧠 Deep RL", variable=self.deep_rl_var).pack(
-            side=tk.LEFT, padx=5,
+            side=tk.LEFT,
+            padx=5,
         )
 
         self.enhanced_features_var = tk.BooleanVar(value=USE_ENHANCED_FEATURES)
         ttk.Checkbutton(
-            features_frame, text="🔬 Enhanced", variable=self.enhanced_features_var,
+            features_frame,
+            text="🔬 Enhanced",
+            variable=self.enhanced_features_var,
         ).pack(side=tk.LEFT, padx=5)
 
         # AI Price and Money Management toggles
         self.ai_price_var = tk.BooleanVar(value=False)
         ttk.Checkbutton(
-            features_frame, text="💹 AI Price", variable=self.ai_price_var,
+            features_frame,
+            text="💹 AI Price",
+            variable=self.ai_price_var,
         ).pack(side=tk.LEFT, padx=5)
 
         self.ai_money_var = tk.BooleanVar(value=False)
         ttk.Checkbutton(
-            features_frame, text="💰 AI Trade", variable=self.ai_money_var,
+            features_frame,
+            text="💰 AI Trade",
+            variable=self.ai_money_var,
         ).pack(side=tk.LEFT, padx=5)
 
         # Manual price entry
@@ -407,9 +469,10 @@ class DerivApp:
         ttk.Label(price_frame, text="Price:", font=("Arial", 9)).pack(side=tk.LEFT)
         self.price_var = tk.StringVar()
         ttk.Entry(
-            price_frame, textvariable=self.price_var, width=10,
+            price_frame,
+            textvariable=self.price_var,
+            width=10,
         ).pack(side=tk.LEFT, padx=5)
-
 
         # Trading settings row
         settings_frame = ttk.Frame(trading_frame)
@@ -454,7 +517,9 @@ class DerivApp:
         ttk.Label(status_frame, text="Status:", font=("Arial", 10, "bold")).pack(side=tk.LEFT)
         self.status_var = tk.StringVar(value="Ready")
         self.status_value = ttk.Label(
-            status_frame, textvariable=self.status_var, font=("Arial", 10),
+            status_frame,
+            textvariable=self.status_var,
+            font=("Arial", 10),
         )
         self.status_value.pack(side=tk.LEFT, padx=5)
 
@@ -467,18 +532,25 @@ class DerivApp:
 
         for i, (label, default) in enumerate(metrics_data):
             ttk.Label(perf_frame, text=label, font=("Arial", 9)).grid(
-                row=0, column=i * 2, padx=5, sticky=tk.W,
+                row=0,
+                column=i * 2,
+                padx=5,
+                sticky=tk.W,
             )
             self.metrics_vars[label] = tk.StringVar(value=default)
             ttk.Label(
-                perf_frame, textvariable=self.metrics_vars[label], font=("Arial", 9, "bold"),
+                perf_frame,
+                textvariable=self.metrics_vars[label],
+                font=("Arial", 9, "bold"),
             ).grid(row=0, column=i * 2 + 1, padx=5, sticky=tk.W)
 
     def _setup_analytics_tab(self):
         """Setup the analytics tab."""
         # Performance analytics frame
         perf_frame = ttk.LabelFrame(
-            self.analytics_tab, text="📊 Performance Analytics", padding=(10, 10),
+            self.analytics_tab,
+            text="📊 Performance Analytics",
+            padding=(10, 10),
         )
         perf_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
 
@@ -495,7 +567,9 @@ class DerivApp:
 
         # Trade history frame
         history_frame = ttk.LabelFrame(
-            self.analytics_tab, text="📋 Trade History", padding=(10, 10),
+            self.analytics_tab,
+            text="📋 Trade History",
+            padding=(10, 10),
         )
         history_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
 
@@ -528,7 +602,9 @@ class DerivApp:
         """Setup the AI management tab with v3.0 enhancements."""
         # AI Model status
         model_frame = ttk.LabelFrame(
-            self.ai_tab, text="🤖 AI Model Status (v3.0)", padding=(10, 10),
+            self.ai_tab,
+            text="🤖 AI Model Status (v3.0)",
+            padding=(10, 10),
         )
         model_frame.pack(fill=tk.X, padx=10, pady=5)
 
@@ -538,58 +614,96 @@ class DerivApp:
 
         # Row 0: Model Type and Architecture
         ttk.Label(info_frame, text="Model Type:", font=("Arial", 10, "bold")).grid(
-            row=0, column=0, sticky=tk.W, padx=5,
+            row=0,
+            column=0,
+            sticky=tk.W,
+            padx=5,
         )
         self.model_type_var = tk.StringVar(value="Ensemble Stacking + SAC v3.0")
         ttk.Label(info_frame, textvariable=self.model_type_var).grid(
-            row=0, column=1, sticky=tk.W, padx=5,
+            row=0,
+            column=1,
+            sticky=tk.W,
+            padx=5,
         )
 
         ttk.Label(info_frame, text="Deep RL:", font=("Arial", 10, "bold")).grid(
-            row=0, column=2, sticky=tk.W, padx=15,
+            row=0,
+            column=2,
+            sticky=tk.W,
+            padx=15,
         )
         self.deep_rl_status_var = tk.StringVar(value="Enabled" if USE_DEEP_RL else "Disabled")
         ttk.Label(info_frame, textvariable=self.deep_rl_status_var).grid(
-            row=0, column=3, sticky=tk.W, padx=5,
+            row=0,
+            column=3,
+            sticky=tk.W,
+            padx=5,
         )
 
         # Row 1: Training Status
         ttk.Label(info_frame, text="Last Training:", font=("Arial", 10, "bold")).grid(
-            row=1, column=0, sticky=tk.W, padx=5,
+            row=1,
+            column=0,
+            sticky=tk.W,
+            padx=5,
         )
         self.last_training_var = tk.StringVar(value="Never")
         ttk.Label(info_frame, textvariable=self.last_training_var).grid(
-            row=1, column=1, sticky=tk.W, padx=5,
+            row=1,
+            column=1,
+            sticky=tk.W,
+            padx=5,
         )
 
         ttk.Label(info_frame, text="Training Samples:", font=("Arial", 10, "bold")).grid(
-            row=1, column=2, sticky=tk.W, padx=15,
+            row=1,
+            column=2,
+            sticky=tk.W,
+            padx=15,
         )
         self.training_samples_var = tk.StringVar(value="0")
         ttk.Label(info_frame, textvariable=self.training_samples_var).grid(
-            row=1, column=3, sticky=tk.W, padx=5,
+            row=1,
+            column=3,
+            sticky=tk.W,
+            padx=5,
         )
 
         # Row 2: Accuracy and Confidence
         ttk.Label(info_frame, text="Model Accuracy:", font=("Arial", 10, "bold")).grid(
-            row=2, column=0, sticky=tk.W, padx=5,
+            row=2,
+            column=0,
+            sticky=tk.W,
+            padx=5,
         )
         self.model_accuracy_var = tk.StringVar(value="N/A")
         ttk.Label(info_frame, textvariable=self.model_accuracy_var).grid(
-            row=2, column=1, sticky=tk.W, padx=5,
+            row=2,
+            column=1,
+            sticky=tk.W,
+            padx=5,
         )
 
         ttk.Label(info_frame, text="Confidence:", font=("Arial", 10, "bold")).grid(
-            row=2, column=2, sticky=tk.W, padx=15,
+            row=2,
+            column=2,
+            sticky=tk.W,
+            padx=15,
         )
         self.model_confidence_var = tk.StringVar(value="N/A")
         ttk.Label(info_frame, textvariable=self.model_confidence_var).grid(
-            row=2, column=3, sticky=tk.W, padx=5,
+            row=2,
+            column=3,
+            sticky=tk.W,
+            padx=5,
         )
 
         # v3.0 Uncertainty Metrics Frame
         uncertainty_frame = ttk.LabelFrame(
-            self.ai_tab, text="📊 v3.0 Uncertainty Metrics", padding=(10, 10),
+            self.ai_tab,
+            text="📊 v3.0 Uncertainty Metrics",
+            padding=(10, 10),
         )
         uncertainty_frame.pack(fill=tk.X, padx=10, pady=5)
 
@@ -598,34 +712,54 @@ class DerivApp:
 
         # Epistemic Uncertainty (model uncertainty)
         ttk.Label(unc_grid, text="Epistemic (Model):", font=("Arial", 9, "bold")).grid(
-            row=0, column=0, sticky=tk.W, padx=5,
+            row=0,
+            column=0,
+            sticky=tk.W,
+            padx=5,
         )
         self.epistemic_var = tk.StringVar(value="--")
         ttk.Label(unc_grid, textvariable=self.epistemic_var).grid(
-            row=0, column=1, sticky=tk.W, padx=5,
+            row=0,
+            column=1,
+            sticky=tk.W,
+            padx=5,
         )
 
         # Aleatoric Uncertainty (data uncertainty)
         ttk.Label(unc_grid, text="Aleatoric (Data):", font=("Arial", 9, "bold")).grid(
-            row=0, column=2, sticky=tk.W, padx=15,
+            row=0,
+            column=2,
+            sticky=tk.W,
+            padx=15,
         )
         self.aleatoric_var = tk.StringVar(value="--")
         ttk.Label(unc_grid, textvariable=self.aleatoric_var).grid(
-            row=0, column=3, sticky=tk.W, padx=5,
+            row=0,
+            column=3,
+            sticky=tk.W,
+            padx=5,
         )
 
         # Total Uncertainty
         ttk.Label(unc_grid, text="Total Uncertainty:", font=("Arial", 9, "bold")).grid(
-            row=0, column=4, sticky=tk.W, padx=15,
+            row=0,
+            column=4,
+            sticky=tk.W,
+            padx=15,
         )
         self.total_uncertainty_var = tk.StringVar(value="--")
         ttk.Label(unc_grid, textvariable=self.total_uncertainty_var).grid(
-            row=0, column=5, sticky=tk.W, padx=5,
+            row=0,
+            column=5,
+            sticky=tk.W,
+            padx=5,
         )
 
         # Market Regime Detection Frame
         regime_frame = ttk.LabelFrame(
-            self.ai_tab, text="🌍 Market Regime Detection", padding=(10, 10),
+            self.ai_tab,
+            text="🌍 Market Regime Detection",
+            padding=(10, 10),
         )
         regime_frame.pack(fill=tk.X, padx=10, pady=5)
 
@@ -633,27 +767,45 @@ class DerivApp:
         regime_grid.pack(fill=tk.X)
 
         ttk.Label(regime_grid, text="Current Regime:", font=("Arial", 10, "bold")).grid(
-            row=0, column=0, sticky=tk.W, padx=5,
+            row=0,
+            column=0,
+            sticky=tk.W,
+            padx=5,
         )
         self.market_regime_var = tk.StringVar(value="Normal")
         ttk.Label(regime_grid, textvariable=self.market_regime_var, font=("Arial", 10)).grid(
-            row=0, column=1, sticky=tk.W, padx=5,
+            row=0,
+            column=1,
+            sticky=tk.W,
+            padx=5,
         )
 
         ttk.Label(regime_grid, text="Risk Multiplier:", font=("Arial", 10, "bold")).grid(
-            row=0, column=2, sticky=tk.W, padx=15,
+            row=0,
+            column=2,
+            sticky=tk.W,
+            padx=15,
         )
         self.risk_multiplier_var = tk.StringVar(value="1.0x")
         ttk.Label(regime_grid, textvariable=self.risk_multiplier_var).grid(
-            row=0, column=3, sticky=tk.W, padx=5,
+            row=0,
+            column=3,
+            sticky=tk.W,
+            padx=5,
         )
 
         ttk.Label(regime_grid, text="Regime Confidence:", font=("Arial", 10, "bold")).grid(
-            row=0, column=4, sticky=tk.W, padx=15,
+            row=0,
+            column=4,
+            sticky=tk.W,
+            padx=15,
         )
         self.regime_confidence_var = tk.StringVar(value="--")
         ttk.Label(regime_grid, textvariable=self.regime_confidence_var).grid(
-            row=0, column=5, sticky=tk.W, padx=5,
+            row=0,
+            column=5,
+            sticky=tk.W,
+            padx=5,
         )
 
         # AI Features Configuration
@@ -666,22 +818,29 @@ class DerivApp:
 
         self.curiosity_var = tk.BooleanVar(value=True)
         ttk.Checkbutton(
-            toggles_frame, text="🔍 Curiosity Exploration (ICM)", variable=self.curiosity_var,
+            toggles_frame,
+            text="🔍 Curiosity Exploration (ICM)",
+            variable=self.curiosity_var,
         ).pack(side=tk.LEFT, padx=10)
 
         self.nstep_var = tk.BooleanVar(value=True)
         ttk.Checkbutton(toggles_frame, text="📈 N-Step Returns", variable=self.nstep_var).pack(
-            side=tk.LEFT, padx=10,
+            side=tk.LEFT,
+            padx=10,
         )
 
         self.monte_carlo_var = tk.BooleanVar(value=True)
         ttk.Checkbutton(
-            toggles_frame, text="🎲 Monte Carlo VaR", variable=self.monte_carlo_var,
+            toggles_frame,
+            text="🎲 Monte Carlo VaR",
+            variable=self.monte_carlo_var,
         ).pack(side=tk.LEFT, padx=10)
 
         self.calibration_var = tk.BooleanVar(value=True)
         ttk.Checkbutton(
-            toggles_frame, text="📊 Probability Calibration", variable=self.calibration_var,
+            toggles_frame,
+            text="📊 Probability Calibration",
+            variable=self.calibration_var,
         ).pack(side=tk.LEFT, padx=10)
 
         # Action buttons
@@ -689,13 +848,16 @@ class DerivApp:
         action_frame.pack(fill=tk.X, pady=10)
 
         ttk.Button(action_frame, text="🔄 Refresh AI Status", command=self.refresh_ai_status).pack(
-            side=tk.LEFT, padx=5,
+            side=tk.LEFT,
+            padx=5,
         )
         ttk.Button(action_frame, text="🧠 Retrain Models", command=self.on_train_model).pack(
-            side=tk.LEFT, padx=5,
+            side=tk.LEFT,
+            padx=5,
         )
         ttk.Button(action_frame, text="📊 Run Diagnostics", command=self.run_ai_diagnostics).pack(
-            side=tk.LEFT, padx=5,
+            side=tk.LEFT,
+            padx=5,
         )
 
     def refresh_ai_status(self):
@@ -703,7 +865,7 @@ class DerivApp:
         if self.trading_ai:
             # Update model info
             if self.trading_ai.model:
-                accuracy = getattr(self.trading_ai, 'model_accuracy', 0.0)
+                accuracy = getattr(self.trading_ai, "model_accuracy", 0.0)
                 self.model_accuracy_var.set(f"{accuracy * 100:.1f}%")
                 self.last_training_var.set("Trained")
 
@@ -742,26 +904,44 @@ class DerivApp:
 
         # API settings
         ttk.Label(api_frame, text="App ID:", font=("Arial", 10, "bold")).grid(
-            row=0, column=0, sticky=tk.W, padx=5, pady=2,
+            row=0,
+            column=0,
+            sticky=tk.W,
+            padx=5,
+            pady=2,
         )
         self.app_id_var = tk.StringVar(value=DERIV_APP_ID)
         ttk.Entry(api_frame, textvariable=self.app_id_var, width=20).grid(
-            row=0, column=1, sticky=tk.W, padx=5, pady=2,
+            row=0,
+            column=1,
+            sticky=tk.W,
+            padx=5,
+            pady=2,
         )
 
         ttk.Label(api_frame, text="OAuth Token:", font=("Arial", 10, "bold")).grid(
-            row=1, column=0, sticky=tk.W, padx=5, pady=2,
+            row=1,
+            column=0,
+            sticky=tk.W,
+            padx=5,
+            pady=2,
         )
         self.access_token_var = tk.StringVar(
             value=DERIV_ACCESS_TOKEN[:10] + "..." if DERIV_ACCESS_TOKEN else "(not set)",
         )
         ttk.Entry(api_frame, textvariable=self.access_token_var, show="*", width=20).grid(
-            row=1, column=1, sticky=tk.W, padx=5, pady=2,
+            row=1,
+            column=1,
+            sticky=tk.W,
+            padx=5,
+            pady=2,
         )
 
         # Trading Settings
         trading_settings_frame = ttk.LabelFrame(
-            self.settings_tab, text="⚙️ Trading Settings", padding=(10, 10),
+            self.settings_tab,
+            text="⚙️ Trading Settings",
+            padding=(10, 10),
         )
         trading_settings_frame.pack(fill=tk.X, padx=10, pady=5)
 
@@ -770,25 +950,39 @@ class DerivApp:
 
         # Max Daily Loss
         ttk.Label(
-            trading_settings_frame, text="Max Daily Loss ($):", font=("Arial", 10, "bold"),
+            trading_settings_frame,
+            text="Max Daily Loss ($):",
+            font=("Arial", 10, "bold"),
         ).grid(row=0, column=0, sticky=tk.W, padx=5, pady=5)
         self.max_loss_var = tk.StringVar(value="50.00")
         ttk.Entry(trading_settings_frame, textvariable=self.max_loss_var).grid(
-            row=0, column=1, sticky=tk.W, padx=5, pady=5,
+            row=0,
+            column=1,
+            sticky=tk.W,
+            padx=5,
+            pady=5,
         )
 
         # Default Trade Amount
         ttk.Label(
-            trading_settings_frame, text="Default Trade Amount ($):", font=("Arial", 10, "bold"),
+            trading_settings_frame,
+            text="Default Trade Amount ($):",
+            font=("Arial", 10, "bold"),
         ).grid(row=1, column=0, sticky=tk.W, padx=5, pady=5)
         self.trade_amt_var = tk.StringVar(value="10.00")
         ttk.Entry(trading_settings_frame, textvariable=self.trade_amt_var).grid(
-            row=1, column=1, sticky=tk.W, padx=5, pady=5,
+            row=1,
+            column=1,
+            sticky=tk.W,
+            padx=5,
+            pady=5,
         )
 
         # Save Button
         ttk.Button(
-            trading_settings_frame, text="💾 Save Settings", command=self.save_settings,
+            trading_settings_frame,
+            text="💾 Save Settings",
+            command=self.save_settings,
         ).grid(row=2, column=0, columnspan=2, pady=10)
 
         # Theme and UI Settings
@@ -797,7 +991,11 @@ class DerivApp:
 
         # Theme
         ttk.Label(ui_frame, text="Theme:", font=("Arial", 10, "bold")).grid(
-            row=0, column=0, sticky=tk.W, padx=5, pady=5,
+            row=0,
+            column=0,
+            sticky=tk.W,
+            padx=5,
+            pady=5,
         )
         theme_combo = ttk.Combobox(ui_frame, values=["Dark", "Light"], state="readonly")
         theme_combo.set("Dark" if self.current_theme == "dark" else "Light")
@@ -831,12 +1029,14 @@ class DerivApp:
 
         self.status_connection_var = tk.StringVar(value="⚪ Disconnected")
         ttk.Label(self.status_bar, textvariable=self.status_connection_var, font=("Arial", 8)).pack(
-            side=tk.RIGHT, padx=10,
+            side=tk.RIGHT,
+            padx=10,
         )
 
         self.status_time_var = tk.StringVar()
         ttk.Label(self.status_bar, textvariable=self.status_time_var, font=("Arial", 8)).pack(
-            side=tk.RIGHT, padx=10,
+            side=tk.RIGHT,
+            padx=10,
         )
 
         # Update time
@@ -864,7 +1064,8 @@ class DerivApp:
         """Perform market analysis with AI."""
         if not self.market_var.get() or not self.timeframe_var.get():
             messagebox.showwarning(
-                "Selection Required", "Please select a market and timeframe first.",
+                "Selection Required",
+                "Please select a market and timeframe first.",
             )
             return
 
@@ -905,7 +1106,8 @@ class DerivApp:
                     self.root.after(
                         0,
                         lambda: messagebox.showerror(
-                            "Analysis Failed", "Could not generate AI analysis.",
+                            "Analysis Failed",
+                            "Could not generate AI analysis.",
                         ),
                     )
                     return
@@ -916,9 +1118,7 @@ class DerivApp:
                 volatility = analysis["volatility"]
 
                 analysis_text = f"🤖 AI Analysis for {market_name}:\n\n"
-                analysis_text += (
-                    f"• Trend: {trend['direction'].upper()} (Strength: {trend['strength']:.2f})\n"
-                )
+                analysis_text += f"• Trend: {trend['direction'].upper()} (Strength: {trend['strength']:.2f})\n"
                 analysis_text += f"• MACD Signal: {trend['macd_signal'].upper()}\n"
                 analysis_text += f"• RSI: {momentum['rsi']:.1f} ({momentum['rsi_signal']})\n"
                 analysis_text += f"• Volatility: {volatility['regime'].title()}\n"
@@ -935,8 +1135,10 @@ class DerivApp:
             except Exception as exc:
                 error_msg = str(exc)
                 self.root.after(
-                    0, lambda msg=error_msg: messagebox.showerror(
-                        "Error", f"Analysis failed: {msg}",
+                    0,
+                    lambda msg=error_msg: messagebox.showerror(
+                        "Error",
+                        f"Analysis failed: {msg}",
                     ),
                 )
                 self.root.after(0, lambda: self.status_var.set("Analysis failed"))
@@ -1161,7 +1363,8 @@ class DerivApp:
         """Handle the Train Model button click."""
         if not self.market_var.get() or not self.timeframe_var.get():
             messagebox.showwarning(
-                "Selection Required", "Please select a market and timeframe first.",
+                "Selection Required",
+                "Please select a market and timeframe first.",
             )
             return
 
@@ -1288,7 +1491,8 @@ class DerivApp:
             print(f"Error updating status after error: {e}")
 
         messagebox.showerror(
-            "Training Error", f"An error occurred during model training:\n{error_msg}",
+            "Training Error",
+            f"An error occurred during model training:\n{error_msg}",
         )
 
     def show_ai_help(self):
@@ -1297,7 +1501,7 @@ class DerivApp:
 AI Trading Features:
 
 1. Manual Price Setting:
-   Enter a specific price for trade execution. If left empty, 
+   Enter a specific price for trade execution. If left empty,
    the current market price will be used.
 
 2. AI-Managed Price:
@@ -1317,7 +1521,8 @@ AI Trading Features:
         """Handle the Start Auto-Trading button click."""
         if not self.market_var.get() or not self.timeframe_var.get():
             messagebox.showwarning(
-                "Selection Required", "Please select a market and timeframe first.",
+                "Selection Required",
+                "Please select a market and timeframe first.",
             )
             return
 
@@ -1344,7 +1549,8 @@ AI Trading Features:
                 manual_price = float(self.price_var.get().strip())
             except ValueError:
                 messagebox.showerror(
-                    "Invalid Price", "Please enter a valid number for the trading price.",
+                    "Invalid Price",
+                    "Please enter a valid number for the trading price.",
                 )
                 return
 
@@ -1478,7 +1684,8 @@ AI Trading Features:
                     contract_id = status_data.get("contract_id", "")
                     if contract_id:
                         self.trade_monitor.insert(
-                            tk.END, f"  Monitoring contract ID: {contract_id}\n",
+                            tk.END,
+                            f"  Monitoring contract ID: {contract_id}\n",
                         )
 
                 elif status == "update":
@@ -1523,9 +1730,7 @@ AI Trading Features:
 
                         win_rate = 0
                         if trader_status["trade_count"] > 0:
-                            win_rate = (
-                                trader_status["successful_trades"] / trader_status["trade_count"]
-                            )
+                            win_rate = trader_status["successful_trades"] / trader_status["trade_count"]
                         self.metrics_vars["Win Rate:"].set(f"{win_rate:.2%}")
 
                         # Update profit/loss
@@ -1662,7 +1867,8 @@ AI Trading Features:
 
                 # Create a DataFrame with NaN values for the historical part and projection values for the future part
                 projection_full = pd.DataFrame(
-                    index=combined_df.index, columns=["Close", "Lower", "Upper"],
+                    index=combined_df.index,
+                    columns=["Close", "Lower", "Upper"],
                 )
                 projection_full.loc[projection.index, "Close"] = projection["Close"]
                 projection_full.loc[projection.index, "Lower"] = projection["Lower"]
@@ -1701,7 +1907,7 @@ AI Trading Features:
             plot_df = df  # No projection, just use the original data
 
         # Create the plot
-        fig, ax = mpf.plot(plot_df, **plot_args)
+        fig, _ax = mpf.plot(plot_df, **plot_args)
         self.canvas = FigureCanvasTkAgg(fig, master=self.chart_frame)
         self.canvas.draw()
         self.canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
@@ -1736,10 +1942,7 @@ AI Trading Features:
                         balance = balance_info.get("balance")
                         currency = balance_info.get("currency", "USD")
 
-                        if balance is not None:
-                            balance_text = format_currency(float(balance), currency)
-                        else:
-                            balance_text = "--"
+                        balance_text = format_currency(float(balance), currency) if balance is not None else "--"
 
                         self.root.after(
                             0,
@@ -1753,25 +1956,28 @@ AI Trading Features:
         """Update balance display with enhanced styling."""
         self.balance_var.set(balance_text)
         # Apply Balance style for larger, bolder text
-        if hasattr(self, 'balance_value') and self.balance_value:
+        if hasattr(self, "balance_value") and self.balance_value:
             try:
                 self.balance_value.configure(style="Balance.TLabel")
             except Exception:
                 pass  # Style may not apply if widget type doesn't support
-
 
     def _update_connection_status(self, is_connected):
         """Update the connection status indicator in the UI."""
         if is_connected:
             self.connection_status_var.set("🟢 Connected")
             self.connection_indicator_canvas.itemconfig(
-                self.connection_indicator, fill="#10b981", outline="#ffffff",
+                self.connection_indicator,
+                fill="#10b981",
+                outline="#ffffff",
             )
             self.status_connection_var.set("🟢 Connected")
         else:
             self.connection_status_var.set("🔴 Disconnected")
             self.connection_indicator_canvas.itemconfig(
-                self.connection_indicator, fill="#ef4444", outline="#ffffff",
+                self.connection_indicator,
+                fill="#ef4444",
+                outline="#ffffff",
             )
             self.status_connection_var.set("🔴 Disconnected")
 
@@ -1798,7 +2004,9 @@ AI Trading Features:
 
             # Account dashboard
             self.account_frame = ttk.LabelFrame(
-                self.top_section, text="Account Dashboard", padding=(10, 5),
+                self.top_section,
+                text="Account Dashboard",
+                padding=(10, 5),
             )
             self.account_frame.pack(side=tk.TOP, fill=tk.X, padx=10, pady=5)
 
@@ -1811,7 +2019,8 @@ AI Trading Features:
 
             self.connection_status_var = tk.StringVar(value="Checking...")
             self.connection_status = ttk.Label(
-                self.connection_frame, textvariable=self.connection_status_var,
+                self.connection_frame,
+                textvariable=self.connection_status_var,
             )
             self.connection_status.grid(row=0, column=1, padx=5, pady=2, sticky=tk.W)
 
@@ -1828,7 +2037,9 @@ AI Trading Features:
 
             # Basic chart controls
             self.control_frame = ttk.LabelFrame(
-                self.top_section, text="Chart Controls", padding=(10, 5),
+                self.top_section,
+                text="Chart Controls",
+                padding=(10, 5),
             )
             self.control_frame.pack(side=tk.TOP, fill=tk.X, padx=10, pady=5)
 
@@ -1838,7 +2049,10 @@ AI Trading Features:
 
             self.market_var = tk.StringVar()
             self.market_combobox = ttk.Combobox(
-                self.control_frame, textvariable=self.market_var, state="readonly", width=30,
+                self.control_frame,
+                textvariable=self.market_var,
+                state="readonly",
+                width=30,
             )
             self.market_combobox.grid(row=0, column=1, padx=5, pady=5)
             self.market_combobox.bind("<<ComboboxSelected>>", self.on_selection_change)
@@ -1849,7 +2063,10 @@ AI Trading Features:
 
             self.timeframe_var = tk.StringVar()
             self.timeframe_combobox = ttk.Combobox(
-                self.control_frame, textvariable=self.timeframe_var, state="readonly", width=15,
+                self.control_frame,
+                textvariable=self.timeframe_var,
+                state="readonly",
+                width=15,
             )
             timeframe_values = list(get_granularity_mapping().keys())
             self.timeframe_combobox["values"] = timeframe_values
@@ -1864,25 +2081,33 @@ AI Trading Features:
 
             # Basic trading controls
             self.trading_frame = ttk.LabelFrame(
-                self.top_section, text="Trading Controls", padding=(10, 5),
+                self.top_section,
+                text="Trading Controls",
+                padding=(10, 5),
             )
             self.trading_frame.pack(side=tk.TOP, fill=tk.X, padx=10, pady=5)
 
             # Train button
             self.train_button = ttk.Button(
-                self.trading_frame, text="Train Model", command=self.on_train_model,
+                self.trading_frame,
+                text="Train Model",
+                command=self.on_train_model,
             )
             self.train_button.grid(row=0, column=0, padx=5, pady=5)
 
             # Start trading button
             self.start_trading_button = ttk.Button(
-                self.trading_frame, text="Start Auto-Trading", command=self.on_start_trading,
+                self.trading_frame,
+                text="Start Auto-Trading",
+                command=self.on_start_trading,
             )
             self.start_trading_button.grid(row=0, column=1, padx=5, pady=5)
 
             # Stop trading button
             self.stop_trading_button = ttk.Button(
-                self.trading_frame, text="Stop Auto-Trading", command=self.on_stop_trading,
+                self.trading_frame,
+                text="Stop Auto-Trading",
+                command=self.on_stop_trading,
             )
             self.stop_trading_button.grid(row=0, column=2, padx=5, pady=5)
             self.stop_trading_button.config(state=tk.DISABLED)
@@ -1908,5 +2133,7 @@ AI Trading Features:
             print(f"Even basic UI fallback failed: {e}")
             # Create minimal interface
             ttk.Label(
-                self.root, text=f"DART Desktop Interface\nError: {e}", font=("Arial", 12),
+                self.root,
+                text=f"DART Desktop Interface\nError: {e}",
+                font=("Arial", 12),
             ).pack(expand=True)
