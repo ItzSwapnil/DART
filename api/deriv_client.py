@@ -25,6 +25,8 @@ from typing import Any
 import httpx
 import websockets
 
+from utils.api_utils import retry_async
+
 logger = logging.getLogger("deriv_client")
 
 
@@ -252,6 +254,7 @@ class DerivClient:
                 self._trading_ws = ws
             return self._trading_ws
 
+    @retry_async()
     async def _send_and_receive_public(
         self,
         message: dict[str, Any],
@@ -264,6 +267,7 @@ class DerivClient:
             ws = await self._get_public_ws()
             return await self._send_and_receive(ws, message, match_key=match_key, timeout=timeout)
 
+    @retry_async()
     async def _send_and_receive_trading(
         self,
         message: dict[str, Any],
@@ -321,7 +325,7 @@ class DerivClient:
             except TimeoutError:
                 raise TimeoutError("Timed out waiting for Deriv WebSocket response") from None
             except Exception as e:
-                logger.error(f"WebSocket receive error: {e}")
+                logger.error("WebSocket receive error: %s", e)
                 raise
 
             try:
@@ -340,6 +344,7 @@ class DerivClient:
 
     # -- OTP-based authenticated WebSocket ----------------------------------
 
+    @retry_async()
     async def _get_otp_ws_url(self) -> str | None:
         """Obtain an OTP-authenticated WebSocket URL via REST."""
         if not (self.access_token and self.account_id):
@@ -353,8 +358,9 @@ class DerivClient:
                 return resp.json().get("data", {}).get("url")
         except Exception as e:
             logger.error("Failed to fetch OTP WebSocket URL: %s", e)
-            return None
+            raise
 
+    @retry_async()
     async def _open_trading_ws(self):
         """Open an authenticated trading WebSocket.
 
@@ -384,7 +390,7 @@ class DerivClient:
                 return ws
             except Exception as e:
                 logger.error("PAT WebSocket connection failed: %s", e)
-                return None
+                raise
 
         otp_url = await self._get_otp_ws_url()
         if otp_url:
@@ -392,6 +398,7 @@ class DerivClient:
                 return await websockets.connect(otp_url)
             except Exception as e:
                 logger.error("OTP WebSocket connection failed: %s", e)
+                raise
 
         # Fallback: public endpoint (market data only, no trading)
         logger.warning("No OAuth credentials — connecting to public WebSocket (read-only)")
@@ -650,8 +657,24 @@ class DerivClient:
 
         if self._is_pat():
             try:
-                # Trigger persistent trading WS which will authorize and cache account_info automatically
-                await self._get_trading_ws()
+                # Trigger persistent trading WS
+                ws = await self._get_trading_ws()
+                # Refresh authorization to fetch the latest balance, currency, etc.
+                auth_resp = await self._send_and_receive(
+                    ws, {"authorize": self.access_token, "req_id": 10}, match_key="authorize"
+                )
+                auth_data = auth_resp.get("authorize", {})
+                if auth_data:
+                    self.account_info = {
+                        "account_id": auth_data.get("loginid"),
+                        "balance": str(auth_data.get("balance", "0")),
+                        "currency": auth_data.get("currency", "USD"),
+                        "email": auth_data.get("email"),
+                        "fullname": auth_data.get("fullname"),
+                        "is_virtual": auth_data.get("is_virtual"),
+                    }
+                    self.account_id = self.account_info["account_id"]
+                    self.is_connected = True
                 return self.account_info
             except Exception as e:
                 logger.error("PAT account info failed: %s", e)
@@ -681,9 +704,9 @@ class DerivClient:
         self.is_connected = False
         return None
 
-    async def get_account_balance(self) -> dict[str, Any] | None:
+    async def get_account_balance(self, force: bool = True) -> dict[str, Any] | None:
         """Get account balance from cached or freshly loaded account info."""
-        if self._is_pat() or self.account_info is None:
+        if force or self.account_info is None:
             await self.get_account_info()
 
         if self.account_info:

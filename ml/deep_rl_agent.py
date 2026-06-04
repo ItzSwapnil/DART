@@ -95,7 +95,7 @@ class TradingEncoder(nn.Module):
         )
 
         # Fundamental data encoder
-        self.fundamental_linear = nn.Linear(fundamental_features, d_model // 2)
+        self.fundamental_linear = nn.Linear(fundamental_features, d_model)
 
         # Price data encoder with positional encoding
         self.price_embedding = nn.Linear(4, d_model // 4)  # OHLC
@@ -115,9 +115,14 @@ class TradingEncoder(nn.Module):
         """Create sinusoidal positional encodings."""
         pe = torch.zeros(max_len, d_model)
         position = torch.arange(0, max_len, dtype=torch.float).unsqueeze(1)
-        div_term = torch.exp(torch.arange(0, d_model, 2).float() * (-math.log(10000.0) / d_model))
-        pe[:, 0::2] = torch.sin(position * div_term)
-        pe[:, 1::2] = torch.cos(position * div_term)
+        
+        # Support both even and odd d_model sizes robustly
+        div_term_even = torch.exp(torch.arange(0, d_model, 2).float() * (-math.log(10000.0) / d_model))
+        pe[:, 0::2] = torch.sin(position * div_term_even)
+        
+        div_term_odd = torch.exp(torch.arange(1, d_model, 2).float() * (-math.log(10000.0) / d_model))
+        pe[:, 1::2] = torch.cos(position * div_term_odd)
+        
         return nn.Parameter(pe.unsqueeze(0), requires_grad=False)
 
     def forward(self, technical_data, price_data, volume_data, fundamental_data=None):
@@ -138,7 +143,12 @@ class TradingEncoder(nn.Module):
 
         # Add positional encoding
         seq_len = combined.size(1)
-        combined = combined + self.positional_encoding[:, :seq_len, : combined.size(-1)]
+        if seq_len > self.positional_encoding.size(1):
+            # Dynamically compute positional encoding if seq_len exceeds max_len
+            pe = self._create_positional_encoding(seq_len, combined.size(-1)).to(combined.device)
+            combined = combined + pe
+        else:
+            combined = combined + self.positional_encoding[:, :seq_len, : combined.size(-1)].to(combined.device)
 
         # Apply attention layers
         for attention in self.attention_layers:
@@ -542,7 +552,7 @@ class SoftActorCriticV2:
         target_entropy_scale=1.0,
     ):
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        logger.info(f"DART v2.0 Deep RL Agent using device: {self.device}")
+        logger.info("DART v2.0 Deep RL Agent using device: %s", self.device)
 
         self.gamma = gamma
         self.tau = tau
@@ -630,26 +640,29 @@ class SoftActorCriticV2:
         volume_tensor = torch.as_tensor(volume, dtype=torch.float32).to(self.device)
         
         # Ensure 3D shapes: [1, 50, 20] for technical, [1, 50, 4] for price, [1, 50] for volume
+        if tech_tensor.ndim == 4:
+            if tech_tensor.shape[0] == 1:
+                tech_tensor = tech_tensor.squeeze(0)
+            if tech_tensor.ndim == 4 and tech_tensor.shape[1] == 1:
+                tech_tensor = tech_tensor.squeeze(1)
         if tech_tensor.ndim == 2:
             tech_tensor = tech_tensor.unsqueeze(0)
-        elif tech_tensor.ndim == 4:
-            tech_tensor = tech_tensor.squeeze()
-            if tech_tensor.ndim == 2:
-                tech_tensor = tech_tensor.unsqueeze(0)
                 
+        if price_tensor.ndim == 4:
+            if price_tensor.shape[0] == 1:
+                price_tensor = price_tensor.squeeze(0)
+            if price_tensor.ndim == 4 and price_tensor.shape[1] == 1:
+                price_tensor = price_tensor.squeeze(1)
         if price_tensor.ndim == 2:
             price_tensor = price_tensor.unsqueeze(0)
-        elif price_tensor.ndim == 4:
-            price_tensor = price_tensor.squeeze()
-            if price_tensor.ndim == 2:
-                price_tensor = price_tensor.unsqueeze(0)
                 
+        if volume_tensor.ndim == 3:
+            if volume_tensor.shape[0] == 1:
+                volume_tensor = volume_tensor.squeeze(0)
+            if volume_tensor.ndim == 3 and volume_tensor.shape[1] == 1:
+                volume_tensor = volume_tensor.squeeze(1)
         if volume_tensor.ndim == 1:
             volume_tensor = volume_tensor.unsqueeze(0)
-        elif volume_tensor.ndim == 3:
-            volume_tensor = volume_tensor.squeeze()
-            if volume_tensor.ndim == 1:
-                volume_tensor = volume_tensor.unsqueeze(0)
 
         fundamental_data = None
         if "fundamental" in state_data:
@@ -852,9 +865,13 @@ class SoftActorCriticV2:
             
             # Squeeze out any unnecessary dimensions of size 1
             if tech_tensor.ndim == 4:
-                tech_tensor = tech_tensor.squeeze(0).squeeze(1)
+                if tech_tensor.shape[0] == 1:
+                    tech_tensor = tech_tensor.squeeze(0)
+                if tech_tensor.ndim == 3 and tech_tensor.shape[0] == 1:
+                    tech_tensor = tech_tensor.squeeze(0)
             elif tech_tensor.ndim == 3:
-                tech_tensor = tech_tensor.squeeze(0)
+                if tech_tensor.shape[0] == 1:
+                    tech_tensor = tech_tensor.squeeze(0)
             
             # Ensure final shape is exactly [50, 20]
             if tech_tensor.shape != (50, 20):
@@ -874,9 +891,13 @@ class SoftActorCriticV2:
             price_tensor = torch.as_tensor(price, dtype=torch.float32)
             
             if price_tensor.ndim == 4:
-                price_tensor = price_tensor.squeeze(0).squeeze(1)
+                if price_tensor.shape[0] == 1:
+                    price_tensor = price_tensor.squeeze(0)
+                if price_tensor.ndim == 3 and price_tensor.shape[0] == 1:
+                    price_tensor = price_tensor.squeeze(0)
             elif price_tensor.ndim == 3:
-                price_tensor = price_tensor.squeeze(0)
+                if price_tensor.shape[0] == 1:
+                    price_tensor = price_tensor.squeeze(0)
                 
             if price_tensor.shape != (50, 4):
                 if price_tensor.numel() == 200:
@@ -895,9 +916,13 @@ class SoftActorCriticV2:
             vol_tensor = torch.as_tensor(vol, dtype=torch.float32)
             
             if vol_tensor.ndim == 3:
-                vol_tensor = vol_tensor.squeeze(0).squeeze(1)
+                if vol_tensor.shape[0] == 1:
+                    vol_tensor = vol_tensor.squeeze(0)
+                if vol_tensor.ndim == 2 and vol_tensor.shape[0] == 1:
+                    vol_tensor = vol_tensor.squeeze(0)
             elif vol_tensor.ndim == 2:
-                vol_tensor = vol_tensor.squeeze(0)
+                if vol_tensor.shape[0] == 1:
+                    vol_tensor = vol_tensor.squeeze(0)
                 
             if vol_tensor.shape != (50,):
                 if vol_tensor.numel() == 50:
@@ -1015,7 +1040,7 @@ class SoftActorCriticV2:
             checkpoint["curiosity_optimizer_state_dict"] = self.curiosity_optimizer.state_dict()
 
         torch.save(checkpoint, filepath)
-        logger.info(f"SAC v2.0 models saved to {filepath}")
+        logger.info("SAC v2.0 models saved to %s", filepath)
 
     def load_models(self, filepath):
         """Load all model parameters."""
@@ -1044,10 +1069,10 @@ class SoftActorCriticV2:
                     checkpoint["curiosity_optimizer_state_dict"],
                 )
 
-            logger.info(f"SAC v2.0 models loaded from {filepath}")
+            logger.info("SAC v2.0 models loaded from %s", filepath)
             return True
         else:
-            logger.warning(f"No checkpoint found at {filepath}")
+            logger.warning("No checkpoint found at %s", filepath)
             return False
 
     def get_training_metrics(self):

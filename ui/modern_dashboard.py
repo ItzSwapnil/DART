@@ -1001,6 +1001,75 @@ app.layout = dbc.Container(
                                 dbc.Input(
                                     id="trade-amount-input", type="number", value=TRADE_AMOUNT, min=1, className="mb-4"
                                 ),
+                                html.Label("Max Concurrent Trades", className="mb-2"),
+                                dbc.Input(
+                                    id="max-concurrent-trades-input",
+                                    type="number",
+                                    value=5,
+                                    min=1,
+                                    className="mb-4",
+                                ),
+                                html.Hr(style={"borderColor": "rgba(255, 255, 255, 0.1)"}),
+                                html.H5("⚙️ Management Switches", className="mb-3 text-info"),
+                                dbc.Checklist(
+                                    id="management-switches",
+                                    options=[
+                                        {"label": "💰 Auto Money Management", "value": "auto_money"},
+                                        {"label": "⚠️ Risk Management Active", "value": "risk_mgmt"},
+                                        {"label": "⏱️ Auto Time Management", "value": "auto_time"},
+                                    ],
+                                    value=["auto_money", "risk_mgmt", "auto_time"],
+                                    switch=True,
+                                    className="mb-3",
+                                ),
+                                html.Label("Selected Risk Profile", className="mb-2"),
+                                dcc.Dropdown(
+                                    id="risk-level-selector",
+                                    options=[
+                                        {"label": "Low Risk", "value": "Low"},
+                                        {"label": "Medium Risk", "value": "Medium"},
+                                        {"label": "High Risk", "value": "High"},
+                                    ],
+                                    value="Medium",
+                                    clearable=False,
+                                    className="mb-3 dash-dropdown",
+                                ),
+                                html.Div(
+                                    id="manual-duration-container",
+                                    children=[
+                                        html.Label("Manual Duration", className="mb-2"),
+                                        dbc.Row(
+                                            [
+                                                dbc.Col(
+                                                    dbc.Input(
+                                                        id="manual-duration-val",
+                                                        type="number",
+                                                        value=60,
+                                                        min=1,
+                                                        className="mb-2",
+                                                    ),
+                                                    width=8,
+                                                ),
+                                                dbc.Col(
+                                                    dcc.Dropdown(
+                                                        id="manual-duration-unit",
+                                                        options=[
+                                                            {"label": "s", "value": "s"},
+                                                            {"label": "m", "value": "m"},
+                                                            {"label": "h", "value": "h"},
+                                                            {"label": "t", "value": "t"},
+                                                        ],
+                                                        value="s",
+                                                        clearable=False,
+                                                        className="dash-dropdown",
+                                                    ),
+                                                    width=4,
+                                                ),
+                                            ]
+                                        ),
+                                    ],
+                                    style={"display": "none"},
+                                ),
                                 html.Hr(style={"borderColor": "rgba(255, 255, 255, 0.1)"}),
                                 html.H5("🎮 Controls", className="mb-3 text-info"),
                                 # Train Model Section with Mini Progress Bar
@@ -1543,6 +1612,11 @@ def update_market_dropdown(category, select_all_clicks, clear_all_clicks, n_inte
         State("ai-switches", "value"),
         State("max-daily-loss-input", "value"),
         State("trade-amount-input", "value"),
+        State("management-switches", "value"),
+        State("risk-level-selector", "value"),
+        State("manual-duration-val", "value"),
+        State("manual-duration-unit", "value"),
+        State("max-concurrent-trades-input", "value"),
     ],
 )
 def update_dashboard_metrics(
@@ -1556,6 +1630,11 @@ def update_dashboard_metrics(
     ai_switches,
     max_daily_loss,
     trade_amount,
+    mgmt_switches,
+    risk_level,
+    manual_duration,
+    manual_duration_unit,
+    max_concurrent_trades,
 ):
     try:
         return _update_dashboard_metrics_impl(
@@ -1569,6 +1648,11 @@ def update_dashboard_metrics(
             ai_switches,
             max_daily_loss,
             trade_amount,
+            mgmt_switches,
+            risk_level,
+            manual_duration,
+            manual_duration_unit,
+            max_concurrent_trades,
         )
     except Exception as e:
         import traceback
@@ -1590,6 +1674,11 @@ def _update_dashboard_metrics_impl(
     ai_switches,
     max_daily_loss,
     trade_amount,
+    mgmt_switches,
+    risk_level,
+    manual_duration,
+    manual_duration_unit,
+    max_concurrent_trades,
 ):
     """Update all dashboard counters, lists, charts, and logs from sync variables."""
     # Dynamically update the running auto-trader's parameters with the user's slider/input adjustments
@@ -1601,6 +1690,32 @@ def _update_dashboard_metrics_impl(
         config.risk.max_daily_loss = max_daily_loss
         config.ai.use_deep_rl = "deep_rl" in ai_switches
         config.ai.use_ensemble_ml = "enhanced" in ai_switches
+
+        mgmt_list = mgmt_switches or []
+        auto_trader.auto_money_management = "auto_money" in mgmt_list
+        auto_trader.risk_management_enabled = "risk_mgmt" in mgmt_list
+        auto_trader.auto_time_management = "auto_time" in mgmt_list
+        auto_trader.manual_duration = int(manual_duration or 60)
+        auto_trader.manual_duration_unit = manual_duration_unit or "s"
+        auto_trader.max_simultaneous_trades = int(max_concurrent_trades or 5)
+        # Update risk level parameters on risk manager if available
+        if auto_trader.risk_manager:
+            try:
+                r_lvl = risk_level or "Medium"
+                if r_lvl == "Low":
+                    auto_trader.risk_manager.max_portfolio_risk = 0.01
+                    auto_trader.risk_manager.kelly_fraction = 0.10
+                    auto_trader.risk_manager.position_limits.max_position_size = 0.05
+                elif r_lvl == "High":
+                    auto_trader.risk_manager.max_portfolio_risk = 0.05
+                    auto_trader.risk_manager.kelly_fraction = 0.50
+                    auto_trader.risk_manager.position_limits.max_position_size = 0.20
+                else:  # Medium / default
+                    auto_trader.risk_manager.max_portfolio_risk = 0.02
+                    auto_trader.risk_manager.kelly_fraction = 0.25
+                    auto_trader.risk_manager.position_limits.max_position_size = 0.10
+            except Exception as e:
+                logger.warning(f"Failed to dynamically adjust risk profile: {e}")
 
     ctx = callback_context
     triggered_id = None
@@ -1650,10 +1765,25 @@ def _update_dashboard_metrics_impl(
             config.trading.base_trade_amount = trade_amount
             config.ai.use_deep_rl = "deep_rl" in ai_switches
             config.ai.use_ensemble_ml = "enhanced" in ai_switches
+
+            # Read management switches and other config values
+            mgmt_list = mgmt_switches or []
+            auto_money = "auto_money" in mgmt_list
+            risk_mgmt = "risk_mgmt" in mgmt_list
+            auto_time = "auto_time" in mgmt_list
+
             success = auto_trader.start_trading(
                 symbol=raw_symbols_list,
                 granularity=granularity,
                 confidence_threshold=confidence_threshold,
+                auto_money_management=auto_money,
+                risk_management_enabled=risk_mgmt,
+                auto_time_management=auto_time,
+                manual_duration=int(manual_duration or 60),
+                manual_duration_unit=manual_duration_unit or "s",
+                base_trade_amount=trade_amount,
+                risk_level=risk_level or "Medium",
+                max_simultaneous_trades=int(max_concurrent_trades or 5),
                 loop=bg_loop,
             )
             if success:
@@ -2167,6 +2297,33 @@ def run_background_analyze(raw_symbols, granularity):
     finally:
         DASHBOARD_STATE["active_tasks"]["analysis"] = None
         DASHBOARD_STATE["active_tasks"]["analysis_progress"] = 0
+
+
+# ---------------------------------------------------------------------------
+# Interaction Toggles Callbacks
+# ---------------------------------------------------------------------------
+
+
+@app.callback(
+    Output("manual-duration-container", "style"),
+    [Input("management-switches", "value")],
+)
+def toggle_manual_duration_visibility(switches):
+    if switches is None:
+        return {"display": "none"}
+    if "auto_time" not in switches:
+        return {"display": "block"}
+    return {"display": "none"}
+
+
+@app.callback(
+    Output("trade-amount-input", "disabled"),
+    [Input("management-switches", "value")],
+)
+def toggle_trade_amount_input_disabled(switches):
+    if switches is None:
+        return False
+    return "auto_money" in switches
 
 
 # Interaction controls are now handled directly inside update_dashboard_metrics callback for immediate responsiveness.

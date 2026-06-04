@@ -5,6 +5,7 @@ and modern ML practices.
 """
 
 import logging
+import math
 import time
 from datetime import datetime
 from pathlib import Path
@@ -270,11 +271,11 @@ class TradingAIv3:
             return {}
 
         # Create target: 1 if next close > current close, 0 otherwise
-        y = (
-            (df["close"].iloc[features_df.index.values].shift(-1) > df["close"].iloc[features_df.index.values])
-            .astype(int)
-            .values[:-1]
-        )
+        # Use integer positional indices to avoid misalignment after dropna()
+        feature_positions = [df.index.get_loc(idx) for idx in features_df.index]
+        close_at_features = df["close"].iloc[feature_positions].values
+        close_next = df["close"].iloc[[min(p + 1, len(df) - 1) for p in feature_positions]].values
+        y = (close_next[:-1] > close_at_features[:-1]).astype(int)
         X = features_df.iloc[:-1].values
 
         # Train ensemble
@@ -361,7 +362,7 @@ class TradingAIv3:
                     if len(self.rl_agent.replay_buffer) >= batch_size:
                         train_steps = min(50, transitions_added // 2)
                         train_steps = max(10, train_steps)
-                        logger.info(f"Running {train_steps} SAC training steps (buffer size: {len(self.rl_agent.replay_buffer)})...")
+                        logger.info("Running %d SAC training steps (buffer size: %d)...", train_steps, len(self.rl_agent.replay_buffer))
                         for _ in range(train_steps):
                             self.rl_agent.train(batch_size=batch_size)
                     else:
@@ -383,7 +384,7 @@ class TradingAIv3:
             "win_rate": accuracy,
         }
 
-        logger.info(f"Training completed in {training_time:.2f}s | Accuracy: {accuracy:.2%}")
+        logger.info("Training completed in %.2fs | Accuracy: %.2f%%", training_time, accuracy * 100)
         self.training_history.append(metrics)
 
         return metrics
@@ -496,7 +497,7 @@ class TradingAIv3:
 
                 rl_prediction = 1 if rl_action[0] > 0 else 0
                 rl_confidence = max(0.0, min(1.0, 1.0 - uncertainty_info["uncertainty"]))
-                logger.info(f"RL agent prediction: {rl_prediction} with confidence {rl_confidence:.2f}")
+                logger.info("RL agent prediction: %s with confidence %.2f", rl_prediction, rl_confidence)
             except Exception as e:
                 logger.warning(f"RL prediction failed: {e}")
 
@@ -574,7 +575,6 @@ class TradingAIv3:
         rl_factor = 1.0
         if rl_prediction is not None and rl_action is not None and len(rl_action) > 1:
             # Map action[1] from [-1, 1] to [0.36, 2.71] using exponential
-            import math
             rl_factor = float(math.exp(rl_action[1]))
 
         # Calculate final duration
@@ -635,8 +635,9 @@ class TradingAIv3:
                     technical_indicators=self._extract_technical_indicators(features_df.iloc[-1]),
                 )
                 strategy["llm_analysis"] = llm_analysis
-                # Adjust confidence using LLM
-                strategy["confidence"] = (final_confidence + llm_analysis.get("confidence", 0.5) * 0.01) / 2
+                # Adjust confidence using LLM (normalize 0-100 score to 0-1)
+                llm_conf = llm_analysis.get("confidence", 50) / 100.0
+                strategy["confidence"] = (final_confidence + llm_conf) / 2
             except Exception as e:
                 logger.debug(f"LLM analysis failed: {e}")
 
@@ -656,7 +657,7 @@ class TradingAIv3:
 
         # Evaluate trading performance
         metrics = self.eval_pipeline.evaluate_trading_performance(trade_results)
-        logger.info(f"Trade metrics: WR={metrics.win_rate:.1%}, PF={metrics.profit_factor:.2f}")
+        logger.info("Trade metrics: WR=%.1f%%, PF=%.2f", metrics.win_rate * 100, metrics.profit_factor)
 
     def save_model(self, name: str = "model") -> Path | None:
         """Save model to disk."""
@@ -666,14 +667,14 @@ class TradingAIv3:
 
         filepath = self.model_dir / f"{name}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pkl"
         joblib.dump(self.ensemble_model, filepath)
-        logger.info(f"Model saved to {filepath}")
+        logger.info("Model saved to %s", filepath)
         return filepath
 
     def load_model(self, filepath: Path) -> bool:
         """Load model from disk."""
         try:
             self.ensemble_model = joblib.load(filepath)
-            logger.info(f"Model loaded from {filepath}")
+            logger.info("Model loaded from %s", filepath)
             return True
         except Exception as e:
             logger.error(f"Failed to load model: {e}")

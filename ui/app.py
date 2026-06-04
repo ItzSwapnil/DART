@@ -448,7 +448,7 @@ class DerivApp:
             variable=self.enhanced_features_var,
         ).pack(side=tk.LEFT, padx=5)
 
-        # AI Price and Money Management toggles
+        # AI Price toggle
         self.ai_price_var = tk.BooleanVar(value=False)
         ttk.Checkbutton(
             features_frame,
@@ -456,12 +456,61 @@ class DerivApp:
             variable=self.ai_price_var,
         ).pack(side=tk.LEFT, padx=5)
 
-        self.ai_money_var = tk.BooleanVar(value=False)
-        ttk.Checkbutton(
-            features_frame,
-            text="💰 AI Trade",
-            variable=self.ai_money_var,
-        ).pack(side=tk.LEFT, padx=5)
+        # DART Management Switches
+        mgmt_frame = ttk.Frame(ai_config_frame)
+        mgmt_frame.pack(fill=tk.X, pady=2)
+
+        self.auto_money_var = tk.BooleanVar(value=True)
+        self.auto_money_check = ttk.Checkbutton(
+            mgmt_frame,
+            text="💰 Auto Money",
+            variable=self.auto_money_var,
+            command=self.toggle_money_management,
+        )
+        self.auto_money_check.pack(side=tk.LEFT, padx=5)
+
+        self.risk_mgmt_var = tk.BooleanVar(value=True)
+        self.risk_mgmt_check = ttk.Checkbutton(
+            mgmt_frame,
+            text="⚠️ Risk Mgmt",
+            variable=self.risk_mgmt_var,
+        )
+        self.risk_mgmt_check.pack(side=tk.LEFT, padx=5)
+
+        self.auto_time_var = tk.BooleanVar(value=True)
+        self.auto_time_check = ttk.Checkbutton(
+            mgmt_frame,
+            text="⏱️ Auto Time",
+            variable=self.auto_time_var,
+            command=self.toggle_time_management,
+        )
+        self.auto_time_check.pack(side=tk.LEFT, padx=5)
+
+        # Manual Time/Duration Entry (active only if Auto Time is False)
+        self.manual_time_frame = ttk.Frame(ai_config_frame)
+        self.manual_time_frame.pack(fill=tk.X, pady=2)
+
+        ttk.Label(self.manual_time_frame, text="Manual Duration:", font=("Arial", 9)).pack(side=tk.LEFT, padx=(5, 2))
+        self.manual_duration_var = tk.StringVar(value="60")
+        self.duration_spinbox = ttk.Spinbox(
+            self.manual_time_frame,
+            from_=1,
+            to=3600,
+            increment=1,
+            textvariable=self.manual_duration_var,
+            width=6,
+        )
+        self.duration_spinbox.pack(side=tk.LEFT, padx=2)
+
+        self.manual_duration_unit_var = tk.StringVar(value="s")
+        self.duration_unit_combo = ttk.Combobox(
+            self.manual_time_frame,
+            textvariable=self.manual_duration_unit_var,
+            values=["s", "m", "h", "t"],
+            state="readonly",
+            width=3,
+        )
+        self.duration_unit_combo.pack(side=tk.LEFT, padx=2)
 
         # Manual price entry
         price_frame = ttk.Frame(ai_config_frame)
@@ -484,7 +533,7 @@ class DerivApp:
 
         ttk.Label(amount_frame, text="💰 Amount:", font=("Arial", 10, "bold")).pack(side=tk.LEFT)
         self.trade_amount_var = tk.StringVar(value="10.0")
-        amount_spinbox = ttk.Spinbox(
+        self.amount_spinbox = ttk.Spinbox(
             amount_frame,
             from_=1.0,
             to=100.0,
@@ -492,7 +541,7 @@ class DerivApp:
             textvariable=self.trade_amount_var,
             width=8,
         )
-        amount_spinbox.pack(side=tk.LEFT, padx=5)
+        self.amount_spinbox.pack(side=tk.LEFT, padx=5)
 
         # Risk level
         risk_frame = ttk.Frame(settings_frame)
@@ -508,6 +557,22 @@ class DerivApp:
             width=8,
         )
         risk_combo.pack(side=tk.LEFT, padx=5)
+
+        # Max concurrent trades
+        max_trades_frame = ttk.Frame(settings_frame)
+        max_trades_frame.pack(side=tk.LEFT, padx=(0, 20))
+
+        ttk.Label(max_trades_frame, text="🔒 Max Trades:", font=("Arial", 10, "bold")).pack(side=tk.LEFT)
+        self.max_trades_var = tk.StringVar(value="5")
+        self.max_trades_spinbox = ttk.Spinbox(
+            max_trades_frame,
+            from_=1,
+            to=20,
+            increment=1,
+            textvariable=self.max_trades_var,
+            width=5,
+        )
+        self.max_trades_spinbox.pack(side=tk.LEFT, padx=5)
 
         # Status and performance
         status_frame = ttk.Frame(trading_frame)
@@ -543,6 +608,26 @@ class DerivApp:
                 textvariable=self.metrics_vars[label],
                 font=("Arial", 9, "bold"),
             ).grid(row=0, column=i * 2 + 1, padx=5, sticky=tk.W)
+
+        # Initialize the state of manual controls based on defaults
+        self.toggle_money_management()
+        self.toggle_time_management()
+
+    def toggle_money_management(self):
+        """Enable/disable manual trade amount input based on Auto Money Management toggle."""
+        if self.auto_money_var.get():
+            self.amount_spinbox.config(state=tk.DISABLED)
+        else:
+            self.amount_spinbox.config(state=tk.NORMAL)
+
+    def toggle_time_management(self):
+        """Enable/disable manual duration input based on Auto Time toggle."""
+        if self.auto_time_var.get():
+            self.duration_spinbox.config(state=tk.DISABLED)
+            self.duration_unit_combo.config(state=tk.DISABLED)
+        else:
+            self.duration_spinbox.config(state=tk.NORMAL)
+            self.duration_unit_combo.config(state="readonly")
 
     def _setup_analytics_tab(self):
         """Setup the analytics tab."""
@@ -1537,7 +1622,7 @@ AI Trading Features:
         # Get trading settings
         manual_price = None
         use_ai_price = self.ai_price_var.get()
-        ai_managed_trading = self.ai_money_var.get()
+        ai_managed_trading = self.auto_money_var.get()
 
         # Use the current confidence threshold from the slider
         global CURRENT_CONFIDENCE_THRESHOLD
@@ -1582,6 +1667,14 @@ AI Trading Features:
             use_ai_price=use_ai_price,
             ai_managed_trading=ai_managed_trading,
             confidence_threshold=confidence_threshold,
+            auto_money_management=self.auto_money_var.get(),
+            risk_management_enabled=self.risk_mgmt_var.get(),
+            auto_time_management=self.auto_time_var.get(),
+            manual_duration=int(self.manual_duration_var.get() or 60),
+            manual_duration_unit=self.manual_duration_unit_var.get(),
+            base_trade_amount=float(self.trade_amount_var.get() or 10.0),
+            risk_level=self.risk_var.get(),
+            max_simultaneous_trades=int(self.max_trades_var.get() or 5),
         )
 
         if success:
@@ -2137,3 +2230,9 @@ AI Trading Features:
                 text=f"DART Desktop Interface\nError: {e}",
                 font=("Arial", 12),
             ).pack(expand=True)
+
+
+if __name__ == "__main__":
+    root = tk.Tk()
+    app = DerivApp(root)
+    root.mainloop()

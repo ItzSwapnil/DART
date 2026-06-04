@@ -79,7 +79,6 @@ class AutoTrader:
         self.model_performance_history: list[dict] = []
 
         # Adaptive trade sizing
-        config = get_config()
         self.base_trade_amount = config.trading.base_trade_amount
         self.current_trade_amount = config.trading.base_trade_amount
         self.trade_size_multiplier = 1.0
@@ -96,6 +95,14 @@ class AutoTrader:
         self.symbol_last_training: dict[str, Any] = {}
         self.symbols: list[str] = []
         self.background_tasks: set[Any] = set()
+
+        # Management toggles
+        self.auto_money_management = True
+        self.risk_management_enabled = True
+        self.auto_time_management = True
+        self.manual_duration = 60
+        self.manual_duration_unit = "s"
+        self.max_simultaneous_trades = 5
 
         # Risk control: consecutive loss tracking
         self.consecutive_losses = 0
@@ -116,7 +123,7 @@ class AutoTrader:
                 require_real_llm=False,
                 eval_pipeline=self.trading_ai.eval_pipeline if self.trading_ai else None,
             )
-            logger.info(f"Initialized symbol-specific model for {symbol}")
+            logger.info("Initialized symbol-specific model for %s", symbol)
         return self.symbol_models[symbol]
 
     def register_status_callback(self, callback):
@@ -276,7 +283,7 @@ class AutoTrader:
             return None
 
         # Apply risk management constraints
-        if self.risk_manager:
+        if self.risk_management_enabled and self.risk_manager:
             try:
                 # Check risk constraints before trading
                 cb_check = self.risk_manager.circuit_breaker_check()
@@ -355,26 +362,27 @@ class AutoTrader:
             self._notify_status({"status": "paused", "message": self.pause_reason})
             return None
 
-        # Check if we've exceeded the daily loss limit
-        config = get_config()
-        if self.daily_loss >= config.risk.max_daily_loss:
-            message = f"Daily loss limit reached: ${self.daily_loss:.2f}"
-            logger.warning(message)
-            self._notify_status({"status": "stopped", "message": message})
-            self.trading_paused = True
-            self.pause_reason = message
-            return None
-
-        # Check for excessive drawdown
-        if self.peak_balance > 0:
-            drawdown_percentage = self.max_drawdown / self.peak_balance
-            if drawdown_percentage > config.risk.max_drawdown:
-                message = f"Maximum drawdown threshold reached: {drawdown_percentage:.1%}"
+        # Check if we've exceeded risk management limits
+        if self.risk_management_enabled:
+            config = get_config()
+            if self.daily_loss >= config.risk.max_daily_loss:
+                message = f"Daily loss limit reached: ${self.daily_loss:.2f}"
                 logger.warning(message)
                 self._notify_status({"status": "stopped", "message": message})
                 self.trading_paused = True
                 self.pause_reason = message
                 return None
+
+            # Check for excessive drawdown
+            if self.peak_balance > 0:
+                drawdown_percentage = self.max_drawdown / self.peak_balance
+                if drawdown_percentage > config.risk.max_drawdown:
+                    message = f"Maximum drawdown threshold reached: {drawdown_percentage:.1%}"
+                    logger.warning(message)
+                    self._notify_status({"status": "stopped", "message": message})
+                    self.trading_paused = True
+                    self.pause_reason = message
+                    return None
 
         # Execute the trade
         contract_type = strategy["contract_type"]
@@ -746,14 +754,14 @@ class AutoTrader:
                 hours_since_training = (datetime.datetime.now() - last_train).total_seconds() / 3600
                 config = get_config()
                 if hours_since_training > config.ai.model_update_frequency_hours:
-                    logger.info(f"Retraining model for {symbol} after {hours_since_training:.1f} hours...")
+                    logger.info("Retraining model for %s after %.1f hours...", symbol, hours_since_training)
                     success = await self.train_model(symbol, granularity)
                     if not success:
                         return False
 
         # Check if model needs initial training
         if not self.symbol_last_training.get(symbol):
-            logger.info(f"No trained model found for {symbol}. Training new model...")
+            logger.info("No trained model found for %s. Training new model...", symbol)
             success = await self.train_model(symbol, granularity)
             if not success:
                 return False
@@ -764,8 +772,16 @@ class AutoTrader:
         if not strategy:
             return False
 
+        # Override duration if time management is disabled
+        if not self.auto_time_management:
+            strategy["duration"] = self.manual_duration
+            strategy["duration_unit"] = self.manual_duration_unit
+            logger.info(
+                f"Manual time override: Setting trade duration to {self.manual_duration}{self.manual_duration_unit}",
+            )
+
         # Check if strategy was blocked by risk manager
-        if strategy.get("risk_blocked", False):
+        if self.risk_management_enabled and strategy.get("risk_blocked", False):
             logger.warning(f"Trade blocked by risk manager: {strategy.get('risk_reason', 'unknown')}")
             self._notify_status({
                 "status": "blocked",
@@ -781,7 +797,6 @@ class AutoTrader:
             else config.risk.confidence_threshold
         )
         # Honor user-selected threshold directly
-        pass
 
         strategy_confidence = strategy.get("confidence", 0)
         if strategy_confidence < threshold_to_use:
@@ -797,14 +812,17 @@ class AutoTrader:
             return False
 
         # Determine trade amount and parameters
-        # Prioritize advanced risk manager's recommendation if available
-        if strategy and "recommended_amount" in strategy:
-            trade_amount = strategy["recommended_amount"]
+        if not self.auto_money_management:
+            trade_amount = self.base_trade_amount
         else:
-            trade_amount = self.current_trade_amount
+            # Prioritize advanced risk manager's recommendation if available
+            if strategy and "recommended_amount" in strategy:
+                trade_amount = strategy["recommended_amount"]
+            else:
+                trade_amount = self.current_trade_amount
 
         # If AI-managed trading is enabled and no risk manager recommendation exists, adjust trade parameters
-        if ai_managed_trading and not (strategy and "recommended_amount" in strategy):
+        if self.auto_money_management and ai_managed_trading and not (strategy and "recommended_amount" in strategy):
             # Get market volatility and recent performance
             try:
                 # Analyze recent candles for volatility
@@ -841,8 +859,23 @@ class AutoTrader:
                         f"AI-managed trading: Adjusted trade amount to ${trade_amount} "
                         + f"(volatility: {volatility:.4f}, win rate: {win_rate:.2f})",
                     )
+            except Exception as e:
+                logger.error(f"Error in AI-managed trading adjustment: {e}")
 
-                    # Also adjust strategy parameters based on market conditions
+        # Also adjust strategy parameters based on market conditions if auto time is enabled
+        if self.auto_time_management:
+            try:
+                # Analyze recent candles for volatility
+                recent_candles = await self.client.get_candles(symbol, granularity, count=20)
+                if recent_candles and len(recent_candles) > 10:
+                    highs = [float(candle["high"]) for candle in recent_candles]
+                    lows = [float(candle["low"]) for candle in recent_candles]
+                    closes = [float(candle["close"]) for candle in recent_candles]
+
+                    avg_price = sum(closes) / len(closes)
+                    price_ranges = [(h - low) / avg_price for h, low in zip(highs, lows, strict=False)]
+                    volatility = sum(price_ranges) / len(price_ranges)
+
                     if strategy:
                         # Adjust duration based on volatility
                         if volatility > 0.02:  # Very high volatility
@@ -860,7 +893,7 @@ class AutoTrader:
                             f"AI-managed trading: Adjusted trade duration to {strategy['duration']}s",
                         )
             except Exception as e:
-                logger.error(f"Error in AI-managed trading adjustment: {e}")
+                logger.debug(f"Error in duration volatility adjustment: {e}")
 
         # Execute trade with determined parameters
         contract_id = await self.execute_trade(
@@ -917,6 +950,13 @@ class AutoTrader:
         use_ai_price=False,
         ai_managed_trading=False,
         confidence_threshold=None,
+        auto_money_management=True,
+        risk_management_enabled=True,
+        auto_time_management=True,
+        manual_duration=60,
+        manual_duration_unit="s",
+        base_trade_amount=None,
+        risk_level="Medium",
     ):
         """
         Run the trading loop continuously.
@@ -932,6 +972,16 @@ class AutoTrader:
         self.is_running = True
         self.trading_paused = False
         self.pause_reason = None
+
+        # Store management options
+        self.auto_money_management = auto_money_management
+        self.risk_management_enabled = risk_management_enabled
+        self.auto_time_management = auto_time_management
+        self.manual_duration = manual_duration
+        self.manual_duration_unit = manual_duration_unit
+        self.risk_level = risk_level
+        if base_trade_amount is not None:
+            self.base_trade_amount = base_trade_amount
 
         # Handle single or multiple symbols
         if isinstance(symbol, str):
@@ -992,6 +1042,7 @@ class AutoTrader:
                     else config.risk.confidence_threshold,
                     "price_setting": price_setting,
                     "trading_mode": trading_mode,
+                    "risk_level": self.risk_level,
                 },
             },
         )
@@ -1059,56 +1110,63 @@ class AutoTrader:
 
                 # Check if trading is paused
                 if self.trading_paused:
-                    logger.info(f"Trading is paused: {self.pause_reason}")
+                    logger.info("Trading is paused: %s", self.pause_reason)
                     self._notify_status({"status": "paused", "message": self.pause_reason})
                     await asyncio.sleep(60)  # Check again in a minute
                     continue
 
                 # --- RISK CONTROL: Limit max simultaneous trades ---
                 # Count currently active/open trades
-                active_trade_count = len([
-                    t for t in self.client.active_trades.values()
-                    if t.get("status") == "open"
-                ])
-                config = get_config()
-                max_simultaneous = min(5, len(self.symbols))  # Max 5 concurrent trades
+                if self.risk_management_enabled:
+                    active_trade_count = len([
+                        t for t in self.client.active_trades.values()
+                        if t.get("status") == "open"
+                    ])
+                    max_simultaneous = self.max_simultaneous_trades
 
-                if active_trade_count >= max_simultaneous:
-                    logger.info(
-                        f"Max simultaneous trades reached ({active_trade_count}/{max_simultaneous}). "
-                        f"Waiting for existing trades to close..."
-                    )
-                    await asyncio.sleep(10)
-                    continue
+                    if active_trade_count >= max_simultaneous:
+                        logger.info(
+                            f"Max simultaneous trades reached ({active_trade_count}/{max_simultaneous}). "
+                            f"Waiting for existing trades to close..."
+                        )
+                        await asyncio.sleep(10)
+                        continue
+                else:
+                    active_trade_count = 0
+                    max_simultaneous = 999
 
                 # --- RISK CONTROL: Consecutive loss streak breaker ---
-                if self.consecutive_losses >= 5:
-                    logger.warning(
-                        f"Consecutive loss streak: {self.consecutive_losses} losses in a row. "
-                        f"Pausing for 2 minutes to let market stabilize..."
-                    )
-                    self._notify_status({
-                        "status": "warning",
-                        "message": f"Loss streak breaker: {self.consecutive_losses} consecutive losses. Pausing 2 min.",
-                    })
-                    await asyncio.sleep(120)
-                    self.consecutive_losses = 0  # Reset after cooldown
-                    continue
+                if self.risk_management_enabled:
+                    if self.consecutive_losses >= 5:
+                        logger.warning(
+                            f"Consecutive loss streak: {self.consecutive_losses} losses in a row. "
+                            f"Pausing for 2 minutes to let market stabilize..."
+                        )
+                        self._notify_status({
+                            "status": "warning",
+                            "message": f"Loss streak breaker: {self.consecutive_losses} consecutive losses. Pausing 2 min.",
+                        })
+                        await asyncio.sleep(120)
+                        self.consecutive_losses = 0  # Reset after cooldown
+                        continue
 
                 # --- RISK CONTROL: Adaptive position sizing ---
                 # Reduce stake size after losses, increase after wins
-                if self.trade_count > 0:
-                    recent_win_rate = self.successful_trades / self.trade_count
-                    if recent_win_rate < 0.4 and self.trade_count >= 5:
-                        # Poor performance: reduce stake to 50% of base
-                        self.current_trade_amount = max(1.0, self.base_trade_amount * 0.5)
-                        logger.info(f"Adaptive sizing: Reduced trade amount to ${self.current_trade_amount:.2f} (win rate: {recent_win_rate:.1%})")
-                    elif recent_win_rate > 0.65 and self.trade_count >= 10:
-                        # Good performance: cautiously increase to 120% of base
-                        self.current_trade_amount = min(self.base_trade_amount * 1.2, self.base_trade_amount * 2)
-                        logger.info(f"Adaptive sizing: Increased trade amount to ${self.current_trade_amount:.2f} (win rate: {recent_win_rate:.1%})")
-                    else:
-                        self.current_trade_amount = self.base_trade_amount
+                if self.auto_money_management:
+                    if self.trade_count > 0:
+                        recent_win_rate = self.successful_trades / self.trade_count
+                        if recent_win_rate < 0.4 and self.trade_count >= 5:
+                            # Poor performance: reduce stake to 50% of base
+                            self.current_trade_amount = max(1.0, self.base_trade_amount * 0.5)
+                            logger.info("Adaptive sizing: Reduced trade amount to $%.2f (win rate: %.1f%%)", self.current_trade_amount, recent_win_rate * 100)
+                        elif recent_win_rate > 0.65 and self.trade_count >= 10:
+                            # Good performance: cautiously increase to 120% of base
+                            self.current_trade_amount = min(self.base_trade_amount * 1.2, self.base_trade_amount * 2)
+                            logger.info("Adaptive sizing: Increased trade amount to $%.2f (win rate: %.1f%%)", self.current_trade_amount, recent_win_rate * 100)
+                        else:
+                            self.current_trade_amount = self.base_trade_amount
+                else:
+                    self.current_trade_amount = self.base_trade_amount
 
                 # Run trading cycles concurrently for all symbols
                 async def run_cycle_for_symbol(sym: str) -> bool:
@@ -1121,20 +1179,21 @@ class AutoTrader:
                         return False
 
                     # --- RISK CONTROL: Per-symbol cooldown after loss ---
-                    cooldown_until = self.symbol_cooldowns.get(sym)
-                    if cooldown_until and datetime.datetime.now() < cooldown_until:
-                        remaining = (cooldown_until - datetime.datetime.now()).total_seconds()
-                        logger.debug(f"Symbol {sym} is in cooldown for {remaining:.0f}s more. Skipping.")
-                        return False
+                    if self.risk_management_enabled:
+                        cooldown_until = self.symbol_cooldowns.get(sym)
+                        if cooldown_until and datetime.datetime.now() < cooldown_until:
+                            remaining = (cooldown_until - datetime.datetime.now()).total_seconds()
+                            logger.debug(f"Symbol {sym} is in cooldown for {remaining:.0f}s more. Skipping.")
+                            return False
 
-                    # --- RISK CONTROL: Skip symbols with high consecutive losses ---
-                    sym_losses = self.symbol_consecutive_losses.get(sym, 0)
-                    if sym_losses >= 3:
-                        cooldown_minutes = min(sym_losses * 2, 30)  # 6 min, 8 min, ... up to 30 min
-                        self.symbol_cooldowns[sym] = datetime.datetime.now() + datetime.timedelta(minutes=cooldown_minutes)
-                        self.symbol_consecutive_losses[sym] = 0  # Reset after cooldown
-                        logger.info(f"Symbol {sym} had {sym_losses} consecutive losses. Cooldown for {cooldown_minutes} min.")
-                        return False
+                        # --- RISK CONTROL: Skip symbols with high consecutive losses ---
+                        sym_losses = self.symbol_consecutive_losses.get(sym, 0)
+                        if sym_losses >= 3:
+                            cooldown_minutes = min(sym_losses * 2, 30)  # 6 min, 8 min, ... up to 30 min
+                            self.symbol_cooldowns[sym] = datetime.datetime.now() + datetime.timedelta(minutes=cooldown_minutes)
+                            self.symbol_consecutive_losses[sym] = 0  # Reset after cooldown
+                            logger.info("Symbol %s had %d consecutive losses. Cooldown for %d min.", sym, sym_losses, cooldown_minutes)
+                            return False
 
                     # Run trade cycle for this symbol
                     return await self.trading_cycle(
@@ -1147,15 +1206,24 @@ class AutoTrader:
 
                 # Only trade a subset of symbols per cycle (rotate through them)
                 # This prevents firing 30 trades simultaneously
-                available_symbols = [
-                    sym for sym in self.symbols
-                    if not any(
-                        t.get("symbol") == sym and t.get("status") == "open"
-                        for t in self.client.active_trades.values()
-                    )
-                    and not (self.symbol_cooldowns.get(sym) and datetime.datetime.now() < self.symbol_cooldowns.get(sym))
-                    and self.symbol_consecutive_losses.get(sym, 0) < 3
-                ]
+                if self.risk_management_enabled:
+                    available_symbols = [
+                        sym for sym in self.symbols
+                        if not any(
+                            t.get("symbol") == sym and t.get("status") == "open"
+                            for t in self.client.active_trades.values()
+                        )
+                        and not (self.symbol_cooldowns.get(sym) and datetime.datetime.now() < self.symbol_cooldowns.get(sym))
+                        and self.symbol_consecutive_losses.get(sym, 0) < 3
+                    ]
+                else:
+                    available_symbols = [
+                        sym for sym in self.symbols
+                        if not any(
+                            t.get("symbol") == sym and t.get("status") == "open"
+                            for t in self.client.active_trades.values()
+                        )
+                    ]
 
                 # Limit to max_simultaneous - active_trade_count new trades per cycle
                 slots_available = max_simultaneous - active_trade_count
@@ -1217,6 +1285,14 @@ class AutoTrader:
         use_ai_price=False,
         ai_managed_trading=False,
         confidence_threshold=None,
+        auto_money_management=True,
+        risk_management_enabled=True,
+        auto_time_management=True,
+        manual_duration=60,
+        manual_duration_unit="s",
+        base_trade_amount=None,
+        risk_level="Medium",
+        max_simultaneous_trades=None,
         loop=None,
     ):
         """
@@ -1224,6 +1300,37 @@ class AutoTrader:
 
         If loop is provided, runs on that event loop directly. Otherwise, starts in a separate thread.
         """
+        # Save settings on self
+        self.auto_money_management = auto_money_management
+        self.risk_management_enabled = risk_management_enabled
+        self.auto_time_management = auto_time_management
+        self.manual_duration = manual_duration
+        self.manual_duration_unit = manual_duration_unit
+        if max_simultaneous_trades is not None:
+            self.max_simultaneous_trades = int(max_simultaneous_trades)
+        if base_trade_amount is not None:
+            self.base_trade_amount = base_trade_amount
+            self.current_trade_amount = base_trade_amount
+
+        # Update risk level parameters if risk manager is available
+        if self.risk_manager:
+            try:
+                if risk_level == "Low":
+                    self.risk_manager.max_portfolio_risk = 0.01
+                    self.risk_manager.kelly_fraction = 0.10
+                    self.risk_manager.position_limits.max_position_size = 0.05
+                elif risk_level == "High":
+                    self.risk_manager.max_portfolio_risk = 0.05
+                    self.risk_manager.kelly_fraction = 0.50
+                    self.risk_manager.position_limits.max_position_size = 0.20
+                else:  # Medium / default
+                    self.risk_manager.max_portfolio_risk = 0.02
+                    self.risk_manager.kelly_fraction = 0.25
+                    self.risk_manager.position_limits.max_position_size = 0.10
+                logger.info(f"Risk profile adjusted to: {risk_level}")
+            except Exception as e:
+                logger.warning(f"Failed to adjust risk profile: {e}")
+
         # If AI-managed trading is enabled, also enable AI price management
         if ai_managed_trading:
             use_ai_price = True
@@ -1236,12 +1343,19 @@ class AutoTrader:
             self.trading_thread = None
             asyncio.run_coroutine_threadsafe(
                 self.run_trading_loop(
-                    symbol,
-                    granularity,
-                    manual_price,
-                    use_ai_price,
-                    ai_managed_trading,
-                    confidence_threshold,
+                    symbol=symbol,
+                    granularity=granularity,
+                    manual_price=manual_price,
+                    use_ai_price=use_ai_price,
+                    ai_managed_trading=ai_managed_trading,
+                    confidence_threshold=confidence_threshold,
+                    auto_money_management=auto_money_management,
+                    risk_management_enabled=risk_management_enabled,
+                    auto_time_management=auto_time_management,
+                    manual_duration=manual_duration,
+                    manual_duration_unit=manual_duration_unit,
+                    base_trade_amount=base_trade_amount,
+                    risk_level=risk_level,
                 ),
                 loop,
             )
@@ -1261,6 +1375,13 @@ class AutoTrader:
                 use_ai_price,
                 ai_managed_trading,
                 confidence_threshold,
+                auto_money_management,
+                risk_management_enabled,
+                auto_time_management,
+                manual_duration,
+                manual_duration_unit,
+                base_trade_amount,
+                risk_level,
             ),
             daemon=True,
         )
@@ -1277,17 +1398,31 @@ class AutoTrader:
         use_ai_price=False,
         ai_managed_trading=False,
         confidence_threshold=None,
+        auto_money_management=True,
+        risk_management_enabled=True,
+        auto_time_management=True,
+        manual_duration=60,
+        manual_duration_unit="s",
+        base_trade_amount=None,
+        risk_level="Medium",
     ):
         """Run the trading loop in a separate thread."""
         asyncio.set_event_loop(loop)
         loop.run_until_complete(
             self.run_trading_loop(
-                symbol,
-                granularity,
-                manual_price,
-                use_ai_price,
-                ai_managed_trading,
-                confidence_threshold,
+                symbol=symbol,
+                granularity=granularity,
+                manual_price=manual_price,
+                use_ai_price=use_ai_price,
+                ai_managed_trading=ai_managed_trading,
+                confidence_threshold=confidence_threshold,
+                auto_money_management=auto_money_management,
+                risk_management_enabled=risk_management_enabled,
+                auto_time_management=auto_time_management,
+                manual_duration=manual_duration,
+                manual_duration_unit=manual_duration_unit,
+                base_trade_amount=base_trade_amount,
+                risk_level=risk_level,
             ),
         )
 
@@ -1299,6 +1434,14 @@ class AutoTrader:
 
         logger.info("Stopping auto-trading...")
         self.is_running = False
+
+        # Cancel all active background tasks
+        if self.background_tasks:
+            logger.info("Cancelling %d active background tasks...", len(self.background_tasks))
+            for task in list(self.background_tasks):
+                if not task.done():
+                    task.cancel()
+            self.background_tasks.clear()
 
         # Wait for the trading thread to finish
         if self.trading_thread and self.trading_thread.is_alive():
@@ -1429,6 +1572,11 @@ class AutoTrader:
 
     def adjust_trade_size(self):
         """Adjust trade size based on performance and risk management."""
+        if not self.auto_money_management:
+            self.current_trade_amount = self.base_trade_amount
+            self.trade_size_multiplier = 1.0
+            return
+
         # Get win rate
         win_rate = self.successful_trades / self.trade_count if self.trade_count > 0 else 0.5
 
@@ -1467,33 +1615,35 @@ class AutoTrader:
 
     def check_trading_conditions(self, symbol=None):
         """Check if trading should continue or be paused based on performance and risk metrics."""
-        # Check daily loss limit
-        config = get_config()
-        if self.daily_loss >= config.risk.max_daily_loss:
-            self.trading_paused = True
-            self.pause_reason = f"Daily loss limit reached: ${self.daily_loss:.2f}"
-            logger.warning(self.pause_reason)
-            return False
-
-        # Check drawdown
-        if self.peak_balance > 0:
-            drawdown_percentage = self.max_drawdown / self.peak_balance
-            if drawdown_percentage > config.risk.max_drawdown:
+        if self.risk_management_enabled:
+            # Check daily loss limit
+            config = get_config()
+            if self.daily_loss >= config.risk.max_daily_loss:
                 self.trading_paused = True
-                self.pause_reason = f"Maximum drawdown threshold reached: {drawdown_percentage:.1%}"
+                self.pause_reason = f"Daily loss limit reached: ${self.daily_loss:.2f}"
                 logger.warning(self.pause_reason)
                 return False
 
-        # Check win rate if we have enough trades
-        if self.trade_count >= 10:
-            win_rate = self.successful_trades / self.trade_count
-            if win_rate < 0.3:  # Very poor performance
-                self.trading_paused = True
-                self.pause_reason = f"Win rate too low: {win_rate:.1%}"
-                logger.warning(self.pause_reason)
-                return False
+            # Check drawdown
+            if self.peak_balance > 0:
+                drawdown_percentage = self.max_drawdown / self.peak_balance
+                if drawdown_percentage > config.risk.max_drawdown:
+                    self.trading_paused = True
+                    self.pause_reason = f"Maximum drawdown threshold reached: {drawdown_percentage:.1%}"
+                    logger.warning(self.pause_reason)
+                    return False
+
+            # Check win rate if we have enough trades
+            if self.trade_count >= 10:
+                win_rate = self.successful_trades / self.trade_count
+                if win_rate < 0.3:  # Very poor performance
+                    self.trading_paused = True
+                    self.pause_reason = f"Win rate too low: {win_rate:.1%}"
+                    logger.warning(self.pause_reason)
+                    return False
 
         # Check if model needs retraining
+        config = get_config()
         last_train = self.symbol_last_training.get(symbol) if symbol else self.last_model_training
         if last_train:
             hours_since_training = (datetime.datetime.now() - last_train).total_seconds() / 3600

@@ -60,7 +60,7 @@ class DARTWebSocketServer:
         self._loop = asyncio.get_running_loop()
         try:
             self.server = await websockets.serve(self._handler, self.host, self.port)
-            logger.info(f"DART WebSocket Server started on wss://{self.host}:{self.port}")
+            logger.info(f"DART WebSocket Server started on ws://{self.host}:{self.port}")
             return True
         except Exception as e:
             logger.error(f"Failed to start WebSocket server on port {self.port}: {e}")
